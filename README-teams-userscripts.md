@@ -67,6 +67,32 @@ node teams-userscript-loader.mjs \
   --scripts ./userscripts
 ```
 
+### Run automatically on macOS
+
+Install and start the two per-user launch agents:
+
+```bash
+npm run service:install
+```
+
+The installer derives the repository path, current Node executable, home
+directory, and GUI user ID. It configures the Teams CDP environment at login and
+keeps the userscript loader running. Fully quit and reopen Teams after
+installation.
+
+Logs are written to:
+
+```text
+~/Library/Logs/teams-user-scripts/loader.log
+~/Library/Logs/teams-user-scripts/loader-error.log
+```
+
+To stop and remove both launch agents:
+
+```bash
+npm run service:uninstall
+```
+
 The loader:
 
 - discovers all current Teams page targets;
@@ -74,6 +100,20 @@ The loader:
 - uses `Page.addScriptToEvaluateOnNewDocument` for reloads and new frames;
 - watches the userscript directory and reinjects edited scripts;
 - discovers new Teams windows, such as meeting and calendar windows.
+
+The included `userscripts/teams-vimium.user.js` adds keyboard-driven Teams
+navigation. Press `?` in Teams to see its key map. It includes:
+
+- Vim-style scrolling and pane selection;
+- previous/next screen navigation;
+- modal dismissal and compose-box insert mode;
+- non-destructive full-page find highlighting;
+- generated hints for visible interactive elements;
+- a searchable vomnibar built from the currently visible Teams UI.
+
+The script deliberately does not intercept regular typing in inputs, textareas,
+comboboxes, or content-editable message composers. `Escape` is the sole
+exception: it returns to normal mode and removes focus.
 
 Supported metadata is intentionally small:
 

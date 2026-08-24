@@ -1,0 +1,14 @@
+{
+  "name": "teams-user-scripts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Load userscripts into Microsoft Teams through its local CDP endpoint.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "service:install": "node scripts/manage-launch-agents.mjs install",
+    "service:uninstall": "node scripts/manage-launch-agents.mjs uninstall"
+  }
+}
