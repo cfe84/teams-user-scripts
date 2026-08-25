@@ -108,8 +108,11 @@ navigation. Press `?` in Teams to see its key map. It includes:
 - previous/next screen navigation;
 - modal dismissal and compose-box insert mode;
 - non-destructive full-page find highlighting;
-- generated hints for visible interactive elements;
-- a searchable vomnibar built from the currently visible Teams UI.
+- short generated hints for visible interactive elements, using home-row keys
+  first and the rest of the alphabet when needed to keep busy screens at two
+  keystrokes;
+- a searchable vomnibar that includes the full virtualized chat rail as well as
+  visible Teams controls.
 
 The script deliberately does not intercept regular typing in inputs, textareas,
 comboboxes, or content-editable message composers. `Escape` is the sole

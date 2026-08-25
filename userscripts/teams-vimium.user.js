@@ -12,7 +12,7 @@ document
   .forEach(element => element.remove());
 
 (() => {
-  const HINT_KEYS = "asdfghjkl";
+  const HINT_KEYS = "asdfghjklqwertyuiopzxcvbnm";
   const OWN_ATTRIBUTE = "data-teams-vimium";
   const FIND_HIGHLIGHT = "teams-vimium-find";
   const CURRENT_FIND_HIGHLIGHT = "teams-vimium-find-current";
@@ -54,6 +54,8 @@ document
     pendingNavigationKey: "",
     pendingNavigationTimer: 0,
     activePane: null,
+    activeChatRow: null,
+    activeChatKey: null,
     find: {
       query: "",
       ranges: [],
@@ -64,6 +66,7 @@ document
     vomnibarEntries: [],
     vomnibarResults: [],
     vomnibarIndex: 0,
+    vomnibarRequest: 0,
   };
 
   const cleanupTasks = [];
@@ -486,9 +489,30 @@ document
     return candidates;
   }
 
+  function scrollableDescendant(element) {
+    if (!(element instanceof HTMLElement)) return null;
+    return [element, ...element.querySelectorAll("*")]
+      .filter(candidate => {
+        if (!(candidate instanceof HTMLElement) || !isVisible(candidate)) {
+          return false;
+        }
+        const style = getComputedStyle(candidate);
+        return (
+          /(auto|scroll|overlay)/.test(style.overflowY) &&
+          candidate.scrollHeight > candidate.clientHeight + 2
+        );
+      })
+      .sort(
+        (left, right) =>
+          right.clientWidth * right.clientHeight -
+          left.clientWidth * left.clientHeight
+      )[0] ?? null;
+  }
+
   function activeScroller() {
     if (state.activePane && document.contains(state.activePane)) {
       return (
+        scrollableDescendant(state.activePane) ||
         getScrollableAncestors(state.activePane)[0] ||
         (state.activePane.scrollHeight > state.activePane.clientHeight
           ? state.activePane
@@ -512,28 +536,125 @@ document
     activeScroller()?.scrollBy({ top: amount, behavior: "smooth" });
   }
 
+  function isChatListActive() {
+    return state.activePane?.matches(
+      "[data-testid='simple-collab-rail'], [data-tid='simple-collab-rail']"
+    );
+  }
+
+  function chatRowKey(row) {
+    return row?.getAttribute("data-fui-tree-item-value");
+  }
+
+  function focusChatRow(row) {
+    if (!(row instanceof HTMLElement)) return;
+    state.activeChatRow = row;
+    state.activeChatKey = chatRowKey(row);
+    row.focus({ preventScroll: true });
+    row.scrollIntoView({ block: "nearest", inline: "nearest" });
+    showPaneIndicator(row);
+  }
+
+  async function moveChatSelection(direction, distance = 1) {
+    const scroller = chatRailScroller();
+    if (!scroller) return;
+
+    let rows = visibleChatRows().sort(
+      (left, right) =>
+        left.getBoundingClientRect().top - right.getBoundingClientRect().top
+    );
+    if (!rows.length) return;
+
+    const focusedRow = document.activeElement?.closest?.(
+      "[data-testid='list-item']"
+    );
+    let current =
+      rows.find(row => chatRowKey(row) === state.activeChatKey) ||
+      (rows.includes(focusedRow) && focusedRow) ||
+      (rows.includes(state.activeChatRow) && state.activeChatRow) ||
+      rows.find(
+        row =>
+          row.getAttribute("aria-selected") === "true" ||
+          row.getAttribute("aria-current") === "true"
+      );
+
+    if (!current) {
+      focusChatRow(direction > 0 ? rows[0] : rows.at(-1));
+      return;
+    }
+
+    let index = rows.indexOf(current);
+    const targetIndex = index + direction * distance;
+    if (rows[targetIndex]) {
+      focusChatRow(rows[targetIndex]);
+      return;
+    }
+
+    const currentKey = chatRowKey(current);
+    const rowHeight = Math.max(1, current.getBoundingClientRect().height);
+    scroller.scrollTop += direction * distance * rowHeight;
+    await nextRender();
+    rows = visibleChatRows().sort(
+      (left, right) =>
+        left.getBoundingClientRect().top - right.getBoundingClientRect().top
+    );
+    index = rows.findIndex(row => chatRowKey(row) === currentKey);
+    focusChatRow(
+      index >= 0
+        ? rows[index + direction * distance] ??
+          (direction > 0 ? rows.at(-1) : rows[0])
+        : direction > 0
+          ? rows[0]
+          : rows.at(-1)
+    );
+  }
+
+  function activateChatSelection() {
+    if (!isChatListActive()) return false;
+    const row =
+      visibleChatRows().find(
+        candidate => chatRowKey(candidate) === state.activeChatKey
+      ) ??
+      document.activeElement?.closest?.("[data-testid='list-item']") ??
+      state.activeChatRow;
+    if (!(row instanceof HTMLElement) || !document.contains(row)) return false;
+    activateElement(row);
+    return true;
+  }
+
+  function navigateVertically(direction, fallbackAmount, chatDistance = 1) {
+    if (isChatListActive()) {
+      void moveChatSelection(direction, chatDistance);
+    } else {
+      scrollByAmount(fallbackAmount);
+    }
+  }
+
   function paneCandidates() {
-    const selectors = [
-      "[role='navigation']",
-      "[role='main']",
-      "[role='complementary']",
-      "[data-tid*='left-rail']",
-      "[data-tid*='chat-list']",
-      "[data-tid*='channel-list']",
-      "[data-tid*='message-pane']",
-      "[data-tid*='conversation']",
-    ];
-    const seen = new Set();
-    return [...document.querySelectorAll(selectors.join(","))]
-      .filter(element => {
-        if (!isVisible(element)) return false;
-        const rect = element.getBoundingClientRect();
-        if (rect.width < 120 || rect.height < 160) return false;
-        const key = `${Math.round(rect.left / 12)}:${Math.round(rect.width / 12)}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
+    const chatList = document.querySelector(
+      "[data-testid='simple-collab-rail'], [data-tid='simple-collab-rail']"
+    );
+    const messageView = document.querySelector(
+      "[data-tid='message-pane-layout'], [data-testid='message-pane-layout']"
+    );
+    const subNavigation = document.querySelector(
+      "[data-tid='app-layout-area--sub-nav'], [data-testid='app-layout-area--sub-nav']"
+    );
+    const main = document.querySelector(
+      "[data-tid='app-layout-area--main'], [data-testid='app-layout-area--main']"
+    );
+
+    return [chatList, subNavigation, isVisible(messageView) ? messageView : main]
+      .filter(
+        element =>
+          element instanceof HTMLElement &&
+          isVisible(element) &&
+          (element === chatList ||
+            element.getBoundingClientRect().left >
+              (chatList?.getBoundingClientRect().left ?? -1)) &&
+          element.getBoundingClientRect().width >= 120 &&
+          element.getBoundingClientRect().height >= 160
+      )
       .sort(
         (left, right) =>
           left.getBoundingClientRect().left - right.getBoundingClientRect().left
@@ -543,19 +664,16 @@ document
   function selectPane(direction) {
     const panes = paneCandidates();
     if (!panes.length) return;
-    const activeRect = state.activePane?.getBoundingClientRect();
-    let index = activeRect
-      ? panes.findIndex(
-          pane =>
-            Math.abs(pane.getBoundingClientRect().left - activeRect.left) < 12
-        )
-      : -1;
+    let index = panes.indexOf(state.activePane);
     if (index < 0) {
       const focused = document.activeElement;
       index = panes.findIndex(pane => pane.contains(focused));
     }
-    if (index < 0) index = direction > 0 ? -1 : panes.length;
-    index = Math.max(0, Math.min(panes.length - 1, index + direction));
+    if (index < 0) {
+      index = direction < 0 ? 0 : panes.length - 1;
+    } else {
+      index = Math.max(0, Math.min(panes.length - 1, index + direction));
+    }
     state.activePane?.removeAttribute("data-teams-vimium-active-pane");
     state.activePane = panes[index];
     state.activePane.setAttribute("data-teams-vimium-active-pane", "true");
@@ -767,9 +885,28 @@ document
 
     const normalisedCandidates = new Set();
     for (const candidate of candidates) {
+      if (
+        candidate.matches(
+          "[role='group'], [data-conversation-folder='true']"
+        )
+      ) {
+        continue;
+      }
       const message = candidate.closest("[data-tid='chat-pane-item']");
       const contact = candidate.closest("[data-testid='list-item']");
-      normalisedCandidates.add(message ?? contact ?? candidate);
+      const quickView = candidate.closest(
+        "[data-tid^='slice-list-item-'], [data-testid^='slice-list-item-']"
+      );
+      const folderHeader = candidate.closest(
+        "[data-tid='conversation-folder-header'], [data-testid='conversation-folder-header']"
+      );
+      normalisedCandidates.add(
+        message ??
+          contact ??
+          quickView ??
+          folderHeader?.firstElementChild ??
+          candidate
+      );
     }
 
     const seenRects = new Set();
@@ -829,6 +966,19 @@ document
   }
 
   function hintTarget(element) {
+    if (
+      element.parentElement?.matches(
+        "[data-tid='conversation-folder-header'], [data-testid='conversation-folder-header']"
+      ) &&
+      element === element.parentElement.firstElementChild
+    ) {
+      return {
+        element,
+        anchor: element,
+        centre: true,
+        activate: () => activateElement(element),
+      };
+    }
     if (element.matches("[data-tid='chat-pane-item']")) {
       const anchor =
         element.querySelector("[data-tid='chat-pane-message']") ?? element;
@@ -843,6 +993,18 @@ document
       return {
         element,
         anchor: element,
+        centre: true,
+        activate: () => activateElement(element),
+      };
+    }
+    if (
+      element.matches(
+        "[data-tid^='slice-list-item-'], [data-testid^='slice-list-item-']"
+      )
+    ) {
+      return {
+        element,
+        anchor: element.querySelector("[role='text']") ?? element,
         centre: true,
         activate: () => activateElement(element),
       };
@@ -905,6 +1067,11 @@ document
   }
 
   function handleHintKey(key) {
+    if (key === "Backspace") {
+      state.hintInput = state.hintInput.slice(0, -1);
+      renderHints();
+      return true;
+    }
     if (!HINT_KEYS.includes(key.toLowerCase())) return false;
     state.hintInput += key.toLowerCase();
     const matches = state.hints.filter(hint =>
@@ -938,9 +1105,96 @@ document
     return role || element.tagName.toLowerCase();
   }
 
-  function collectVomnibarEntries() {
+  function nextRender() {
+    return new Promise(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    );
+  }
+
+  function visibleChatRows() {
+    return [...document.querySelectorAll("[data-testid='list-item']")].filter(
+      isVisible
+    );
+  }
+
+  function chatRailScroller() {
+    const row = visibleChatRows()[0];
+    return row ? getScrollableAncestors(row)[0] : null;
+  }
+
+  async function visitVirtualizedChatRows(
+    scroller,
+    visitor,
+    { restoreScroll = true } = {}
+  ) {
+    const originalScrollTop = scroller.scrollTop;
+    const step = Math.max(1, Math.floor(scroller.clientHeight * 0.75));
+    try {
+      for (
+        let scrollTop = 0;
+        scrollTop <= scroller.scrollHeight;
+        scrollTop += step
+      ) {
+        scroller.scrollTop = Math.min(
+          scrollTop,
+          scroller.scrollHeight - scroller.clientHeight
+        );
+        await nextRender();
+        if (visitor(visibleChatRows()) === false) return;
+        if (
+          scroller.scrollTop >=
+          scroller.scrollHeight - scroller.clientHeight - 1
+        ) {
+          return;
+        }
+      }
+    } finally {
+      if (restoreScroll) {
+        scroller.scrollTop = originalScrollTop;
+        await nextRender();
+      }
+    }
+  }
+
+  async function activateVirtualizedChat(scroller, label) {
+    await visitVirtualizedChatRows(
+      scroller,
+      rows => {
+        const target = rows.find(row => elementLabel(row) === label);
+        if (!target) return true;
+        activateElement(target);
+        return false;
+      },
+      { restoreScroll: false }
+    );
+  }
+
+  async function collectVirtualizedChatEntries() {
+    const scroller = chatRailScroller();
+    if (!scroller) return [];
+    const entries = new Map();
+    await visitVirtualizedChatRows(scroller, rows => {
+      for (const row of rows) {
+        const label = elementLabel(row);
+        if (!label || label.length > 180 || entries.has(label)) continue;
+        entries.set(label, {
+          label,
+          kind: "chat",
+          searchText: `${label} chat`.toLocaleLowerCase(),
+          activate: () => activateVirtualizedChat(scroller, label),
+        });
+      }
+    });
+    return [...entries.values()];
+  }
+
+  function collectVomnibarEntries(additionalEntries = []) {
     const entries = [];
     const seen = new Set();
+    for (const entry of additionalEntries) {
+      seen.add(`${entry.kind}:${entry.label.toLocaleLowerCase()}`);
+      entries.push(entry);
+    }
     for (const element of clickableElements()) {
       const label = elementLabel(element);
       if (!label || label.length > 180) continue;
@@ -953,9 +1207,14 @@ document
         label,
         kind,
         searchText: `${label} ${kind}`.toLocaleLowerCase(),
+        activate: () => activateElement(element),
       });
     }
     return entries.sort((left, right) => {
+      if (!left.element || !right.element) {
+        return left.kind.localeCompare(right.kind) ||
+          left.label.localeCompare(right.label);
+      }
       const leftRect = left.element.getBoundingClientRect();
       const rightRect = right.element.getBoundingClientRect();
       return leftRect.top - rightRect.top || leftRect.left - rightRect.left;
@@ -984,7 +1243,6 @@ document
       .map(entry => ({ entry, score: fuzzyScore(query, entry.searchText) }))
       .filter(result => result.score >= 0)
       .sort((left, right) => right.score - left.score)
-      .slice(0, 100)
       .map(result => result.entry);
     state.vomnibarIndex = Math.max(
       0,
@@ -1011,13 +1269,19 @@ document
       ?.scrollIntoView({ block: "nearest" });
   }
 
-  function openVomnibar() {
+  async function openVomnibar() {
     leaveOverlayMode();
-    state.vomnibarEntries = collectVomnibarEntries();
+    const request = ++state.vomnibarRequest;
     state.vomnibarIndex = 0;
     setMode("vomnibar");
     ui.vomnibar.classList.remove("hidden");
     ui.vomnibarInput.value = "";
+    ui.vomnibarCount.textContent = "Loading…";
+    ui.vomnibarList.replaceChildren();
+    ui.vomnibarInput.focus();
+    const chatEntries = await collectVirtualizedChatEntries();
+    if (request !== state.vomnibarRequest || state.mode !== "vomnibar") return;
+    state.vomnibarEntries = collectVomnibarEntries(chatEntries);
     renderVomnibar();
     ui.vomnibarInput.focus();
   }
@@ -1026,7 +1290,7 @@ document
     const entry = state.vomnibarResults[state.vomnibarIndex];
     if (!entry) return;
     leaveOverlayMode();
-    activateElement(entry.element);
+    entry.activate();
   }
 
   function openHelp() {
@@ -1117,6 +1381,11 @@ document
       return;
     }
 
+    if (key === "Enter" && activateChatSelection()) {
+      prevent(event);
+      return;
+    }
+
     const lowerKey = key.toLowerCase();
     if (event.ctrlKey) {
       if (lowerKey === "e") {
@@ -1130,10 +1399,20 @@ document
     }
 
     const actions = {
-      j: () => scrollByAmount(SCROLL_STEP),
-      k: () => scrollByAmount(-SCROLL_STEP),
-      d: () => scrollByAmount(innerHeight / 2),
-      u: () => scrollByAmount(-innerHeight / 2),
+      j: () => navigateVertically(1, SCROLL_STEP),
+      k: () => navigateVertically(-1, -SCROLL_STEP),
+      d: () =>
+        navigateVertically(
+          1,
+          innerHeight / 2,
+          Math.max(1, Math.floor(visibleChatRows().length / 2))
+        ),
+      u: () =>
+        navigateVertically(
+          -1,
+          -innerHeight / 2,
+          Math.max(1, Math.floor(visibleChatRows().length / 2))
+        ),
       h: () => selectPane(-1),
       l: () => selectPane(1),
       x: closeTopOverlay,
