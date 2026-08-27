@@ -120,6 +120,13 @@ The script deliberately does not intercept regular typing in inputs, textareas,
 comboboxes, or content-editable message composers. `Escape` is the sole
 exception: it returns to normal mode and removes focus.
 
+`userscripts/teams-cs-dev-toggle.user.js` adds a `cs-dev` toggle beside the
+title-bar ring badge. Enabling it sets
+`calling.conversationServiceUrlOverride.url` in `tmp.settings` to
+`https://api.conv-dev.skype.net/conv/`; disabling it removes the override.
+Either action uses the ring popover's **Restart (also exits container)** control
+so the setting takes effect.
+
 Supported metadata is intentionally small:
 
 ```javascript
