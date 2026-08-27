@@ -105,14 +105,16 @@ The included `userscripts/teams-vimium.user.js` adds keyboard-driven Teams
 navigation. Press `?` in Teams to see its key map. It includes:
 
 - Vim-style scrolling and pane selection;
+- spatial `h/j/k/l` navigation between Calendar events, with `Enter` to open
+  the focused event and `[[`/`]]` to change calendar periods;
 - previous/next screen navigation;
 - modal dismissal and compose-box insert mode;
 - non-destructive full-page find highlighting;
 - short generated hints for visible interactive elements, using home-row keys
   first and the rest of the alphabet when needed to keep busy screens at two
   keystrokes;
-- a searchable vomnibar that includes the full virtualized chat rail as well as
-  visible Teams controls.
+- a searchable vomnibar that includes the full virtualized chat rail, visible
+  Teams controls, or every event in the current Calendar period.
 
 The script deliberately does not intercept regular typing in inputs, textareas,
 comboboxes, or content-editable message composers. `Escape` is the sole

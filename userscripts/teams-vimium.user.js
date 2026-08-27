@@ -3,6 +3,7 @@
 // @match        https://teams.microsoft.com/*
 // @match        https://teams.cloud.microsoft/*
 // @match        https://local.teams.office.com/*
+// @match        https://outlook.office.com/hosted/calendar/*
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -18,6 +19,12 @@ document
   const CURRENT_FIND_HIGHLIGHT = "teams-vimium-find-current";
   const NAVIGATION_SEQUENCE_TIMEOUT = 700;
   const SCROLL_STEP = 80;
+  const IS_HOSTED_CALENDAR =
+    location.hostname === "outlook.office.com" &&
+    location.pathname.startsWith("/hosted/calendar/");
+  const HINT_FIRST_KEYS = IS_HOSTED_CALENDAR
+    ? HINT_KEYS.slice(Math.ceil(HINT_KEYS.length / 2))
+    : HINT_KEYS.slice(0, Math.ceil(HINT_KEYS.length / 2));
   const CLICKABLE_SELECTOR = [
     "a[href]",
     "button",
@@ -56,6 +63,7 @@ document
     activePane: null,
     activeChatRow: null,
     activeChatKey: null,
+    activeCalendarItem: null,
     find: {
       query: "",
       ranges: [],
@@ -63,6 +71,8 @@ document
     },
     hints: [],
     hintInput: "",
+    relayedKey: false,
+    hintRelayKeysRemaining: 0,
     vomnibarEntries: [],
     vomnibarResults: [],
     vomnibarIndex: 0,
@@ -302,11 +312,17 @@ document
   );
   const helpEntries = [
     ["Esc", "Normal mode / unfocus"],
-    ["j / Ctrl+e", "Scroll down"],
-    ["k / Ctrl+y", "Scroll up"],
+    ["j / Ctrl+e", IS_HOSTED_CALENDAR ? "Next event down" : "Scroll down"],
+    ["k / Ctrl+y", IS_HOSTED_CALENDAR ? "Next event up" : "Scroll up"],
     ["d / u", "Half page down / up"],
-    ["h / l", "Select left / right pane"],
-    ["[[ / ]]", "Previous / next screen"],
+    [
+      "h / l",
+      IS_HOSTED_CALENDAR ? "Next event left / right" : "Select left / right pane",
+    ],
+    [
+      "[[ / ]]",
+      IS_HOSTED_CALENDAR ? "Previous / next period" : "Previous / next screen",
+    ],
     ["x", "Close top modal or menu"],
     ["i", "Focus main text box"],
     ["/", "Find text"],
@@ -622,6 +638,103 @@ document
     return true;
   }
 
+  function calendarItems() {
+    if (!IS_HOSTED_CALENDAR) return [];
+    return [...document.querySelectorAll("[role='button'][title]")].filter(
+      element => element.getAttribute("title")?.includes("\n") && isVisible(element)
+    );
+  }
+
+  function calendarItemCentre(element) {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+  }
+
+  function focusCalendarItem(element) {
+    if (!(element instanceof HTMLElement)) return;
+    state.activeCalendarItem = element;
+    focusElement(element);
+    showPaneIndicator(element);
+  }
+
+  function moveCalendarSelection(horizontal, vertical) {
+    const items = calendarItems();
+    if (!items.length) return false;
+
+    const active =
+      (items.includes(document.activeElement) && document.activeElement) ||
+      (items.includes(state.activeCalendarItem) && state.activeCalendarItem);
+    if (!active) {
+      const viewportCentre = { x: innerWidth / 2, y: innerHeight / 2 };
+      focusCalendarItem(
+        items.sort((left, right) => {
+          const leftCentre = calendarItemCentre(left);
+          const rightCentre = calendarItemCentre(right);
+          return (
+            Math.hypot(
+              leftCentre.x - viewportCentre.x,
+              leftCentre.y - viewportCentre.y
+            ) -
+            Math.hypot(
+              rightCentre.x - viewportCentre.x,
+              rightCentre.y - viewportCentre.y
+            )
+          );
+        })[0]
+      );
+      return true;
+    }
+
+    const origin = calendarItemCentre(active);
+    const candidates = items
+      .filter(element => element !== active)
+      .map(element => {
+        const centre = calendarItemCentre(element);
+        const x = centre.x - origin.x;
+        const y = centre.y - origin.y;
+        const primary = horizontal ? x * horizontal : y * vertical;
+        const cross = horizontal ? Math.abs(y) : Math.abs(x);
+        return { element, primary, score: primary + cross * 1.5 };
+      })
+      .filter(candidate => candidate.primary > 4)
+      .sort(
+        (left, right) =>
+          left.score - right.score || left.primary - right.primary
+      );
+    if (candidates[0]) focusCalendarItem(candidates[0].element);
+    return true;
+  }
+
+  function activateCalendarSelection() {
+    if (!IS_HOSTED_CALENDAR) return false;
+    const item =
+      (calendarItems().includes(document.activeElement) &&
+        document.activeElement) ||
+      state.activeCalendarItem;
+    if (!(item instanceof HTMLElement) || !document.contains(item)) return false;
+    activateElement(item);
+    return true;
+  }
+
+  function navigateCalendarPeriod(direction) {
+    if (!IS_HOSTED_CALENDAR) return false;
+    const prefix = direction < 0 ? "go to previous " : "go to next ";
+    const button = [...document.querySelectorAll("button")].find(
+      element =>
+        isVisible(element) &&
+        normaliseText(element.getAttribute("aria-label"))
+          .toLocaleLowerCase()
+          .startsWith(prefix)
+    );
+    if (!(button instanceof HTMLElement)) return false;
+    state.activeCalendarItem = null;
+    button.click();
+    return true;
+  }
+
   function navigateVertically(direction, fallbackAmount, chatDistance = 1) {
     if (isChatListActive()) {
       void moveChatSelection(direction, chatDistance);
@@ -865,19 +978,15 @@ document
     );
   }
 
-  function hintCode(index, length) {
-    let value = index;
-    const code = Array(length).fill(HINT_KEYS[0]);
-    for (let position = length - 1; position >= 0; position--) {
-      code[position] = HINT_KEYS[value % HINT_KEYS.length];
-      value = Math.floor(value / HINT_KEYS.length);
-    }
-    return code.join("");
+  function hintCode(index) {
+    return `${HINT_FIRST_KEYS[Math.floor(index / HINT_KEYS.length)]}${
+      HINT_KEYS[index % HINT_KEYS.length]
+    }`;
   }
 
-  function clickableElements() {
-    const candidates = new Set(document.querySelectorAll(CLICKABLE_SELECTOR));
-    for (const element of document.querySelectorAll("*")) {
+  function clickableElements(scope = document) {
+    const candidates = new Set(scope.querySelectorAll(CLICKABLE_SELECTOR));
+    for (const element of scope.querySelectorAll("*")) {
       if (getComputedStyle(element).cursor === "pointer") {
         candidates.add(element.closest(CLICKABLE_SELECTOR) ?? element);
       }
@@ -892,7 +1001,34 @@ document
       ) {
         continue;
       }
-      const message = candidate.closest("[data-tid='chat-pane-item']");
+      const calendarDayControl = IS_HOSTED_CALENDAR
+        ? candidate.closest("[data-telemetry-id='WorkPlanButton']") ??
+          candidate.querySelector?.("[data-telemetry-id='WorkPlanButton']")
+        : null;
+      const calendarDateCell = IS_HOSTED_CALENDAR
+        ? candidate.closest("[role='gridcell'][data-cell-date]")
+        : null;
+      const tab = candidate.closest("[role='tab']");
+      const messageLink =
+        candidate.matches("a[href], [role='link']") &&
+        candidate.closest("[data-tid='chat-pane-item']")
+          ? candidate
+          : null;
+      const messageReaction =
+        candidate.matches(
+          "[data-tid='diverse-reaction-pill-button'], [data-tid='add-reaction-picker-entry-point-button']"
+        ) && candidate.closest("[data-tid='chat-pane-item']")
+          ? candidate
+          : null;
+      const messageImage = candidate.closest(
+        "[data-tid='chat-pane-item'] img[data-gallery-id]"
+      );
+      const message = messageLink || messageReaction || messageImage
+        ? null
+        : candidate.closest("[data-tid='chat-pane-item']");
+      const channel = candidate.closest(
+        "[role='treeitem'][data-item-type='channel']"
+      );
       const contact = candidate.closest("[data-testid='list-item']");
       const quickView = candidate.closest(
         "[data-tid^='slice-list-item-'], [data-testid^='slice-list-item-']"
@@ -901,8 +1037,15 @@ document
         "[data-tid='conversation-folder-header'], [data-testid='conversation-folder-header']"
       );
       normalisedCandidates.add(
+        calendarDateCell ??
+          calendarDayControl ??
+          tab ??
+        messageLink ??
+        messageReaction ??
+        messageImage ??
         message ??
-          contact ??
+        channel ??
+        contact ??
           quickView ??
           folderHeader?.firstElementChild ??
           candidate
@@ -911,7 +1054,13 @@ document
 
     const seenRects = new Set();
     return [...normalisedCandidates].filter(element => {
-      if (!isVisible(element) || element.closest("[inert]")) return false;
+      if (
+        (scope instanceof Element && !scope.contains(element)) ||
+        !isVisible(element) ||
+        element.closest("[inert]")
+      ) {
+        return false;
+      }
       const rect = element.getBoundingClientRect();
       const key = `${Math.round(rect.left)}:${Math.round(rect.top)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
       if (seenRects.has(key)) return false;
@@ -966,6 +1115,49 @@ document
   }
 
   function hintTarget(element) {
+    if (element.matches("[role='gridcell'][data-cell-date]")) {
+      const day = Number(element.getAttribute("data-cell-date")?.split("-").at(-1));
+      return {
+        element,
+        anchor: element,
+        centre: true,
+        calendarDay: day,
+        calendarDayPrimary: !element.classList.contains(
+          "fui-CalendarDayGrid__dayOutsideNavigatedMonth"
+        ),
+        activate: () =>
+          activateElement(element.querySelector("button") ?? element),
+      };
+    }
+    if (element.matches("[data-telemetry-id='WorkPlanButton']")) {
+      return {
+        element,
+        anchor: element,
+        centre: true,
+        activate: () => activateElement(element),
+      };
+    }
+    if (element.matches("[role='tab']")) {
+      return {
+        element,
+        anchor: element,
+        centre: true,
+        activate: () => activateElement(element),
+      };
+    }
+    if (
+      IS_HOSTED_CALENDAR &&
+      element.matches("[role='button'][title]") &&
+      element.getAttribute("title")?.includes("\n")
+    ) {
+      return {
+        element,
+        anchor: element,
+        centre: true,
+        openMeetingCardHints: true,
+        activate: () => activateElement(element),
+      };
+    }
     if (
       element.parentElement?.matches(
         "[data-tid='conversation-folder-header'], [data-testid='conversation-folder-header']"
@@ -987,6 +1179,23 @@ document
         anchor,
         centre: true,
         activate: () => revealMessageActions(element),
+      };
+    }
+    if (element.matches("img[data-gallery-id]")) {
+      return {
+        element,
+        anchor: element,
+        centre: true,
+        activate: () => activateElement(element),
+      };
+    }
+    if (element.matches("[role='treeitem'][data-item-type='channel']")) {
+      return {
+        element,
+        anchor:
+          element.querySelector("[id^='title-channel-list-item-']") ?? element,
+        centre: true,
+        activate: () => activateElement(element),
       };
     }
     if (element.matches("[data-testid='list-item']")) {
@@ -1038,20 +1247,90 @@ document
     }
   }
 
-  function openHints() {
-    leaveOverlayMode();
-    const targets = clickableElements().map(hintTarget);
-    if (!targets.length) return;
-    setMode("hint");
-    const codeLength = Math.max(
-      1,
-      Math.ceil(Math.log(targets.length) / Math.log(HINT_KEYS.length))
+  function meetingCard() {
+    const viewEventButton = [...document.querySelectorAll("button")].find(
+      element =>
+        element.getAttribute("aria-label") === "View event" &&
+        isVisible(element)
     );
-    state.hints = targets.map((target, index) => {
+    if (!viewEventButton) return null;
+    for (
+      let candidate = viewEventButton.parentElement;
+      candidate instanceof HTMLElement;
+      candidate = candidate.parentElement
+    ) {
+      const rect = candidate.getBoundingClientRect();
+      if (
+        rect.width >= 280 &&
+        rect.height >= 100 &&
+        candidate.querySelectorAll("button, [role='button']").length >= 5
+      ) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  async function openMeetingCardHints(meetingTitle) {
+    let previousRect;
+    let stableFrames = 0;
+    for (let attempt = 0; attempt < 60; attempt++) {
+      await nextRender();
+      const card = meetingCard();
+      if (!card || !normaliseText(card.textContent).includes(meetingTitle)) {
+        previousRect = undefined;
+        stableFrames = 0;
+        continue;
+      }
+      const rect = card.getBoundingClientRect();
+      const currentRect = [rect.left, rect.top, rect.width, rect.height];
+      const isStable =
+        previousRect &&
+        currentRect.every(
+          (value, index) => Math.abs(value - previousRect[index]) < 0.5
+        );
+      stableFrames = isStable ? stableFrames + 1 : 0;
+      previousRect = currentRect;
+      if (stableFrames >= 3) {
+        openHints(card);
+        return;
+      }
+    }
+  }
+
+  function openHints(scope = document) {
+    leaveOverlayMode();
+    const targets = clickableElements(scope).map(hintTarget);
+    if (!targets.length) return;
+    if (targets.length > HINT_FIRST_KEYS.length * HINT_KEYS.length) {
+      console.warn("Too many targets for two-character Teams Vimium hints");
+      return;
+    }
+    setMode("hint");
+    const calendarDayIndexes = new Map();
+    let generatedCodeIndex = 0;
+    state.hints = targets.map(target => {
       const rect = target.anchor.getBoundingClientRect();
       const label = document.createElement("span");
       label.className = "hint";
-      const code = hintCode(index, codeLength);
+      let code;
+      if (target.calendarDay) {
+        if (target.calendarDayPrimary) {
+          code =
+            target.calendarDay <= 3
+              ? String(target.calendarDay).padStart(2, "0")
+              : String(target.calendarDay);
+        } else {
+          const conflictIndex =
+            calendarDayIndexes.get(target.calendarDay) ?? 0;
+          calendarDayIndexes.set(target.calendarDay, conflictIndex + 1);
+          code = `${target.calendarDay}${String.fromCharCode(
+            "a".charCodeAt(0) + conflictIndex
+          )}`;
+        }
+      } else {
+        code = hintCode(generatedCodeIndex++);
+      }
       label.textContent = code;
       if (target.centre) {
         label.style.left = `${rect.left + rect.width / 2}px`;
@@ -1072,16 +1351,24 @@ document
       renderHints();
       return true;
     }
-    if (!HINT_KEYS.includes(key.toLowerCase())) return false;
+    if (!/^[a-z0-9]$/i.test(key)) return false;
     state.hintInput += key.toLowerCase();
     const matches = state.hints.filter(hint =>
       hint.code.startsWith(state.hintInput)
     );
     if (matches.length === 1 && matches[0].code === state.hintInput) {
-      const { activate } = matches[0];
+      const { activate, openMeetingCardHints: shouldOpenMeetingCardHints } =
+        matches[0];
+      const meetingTitle = shouldOpenMeetingCardHints
+        ? normaliseText(matches[0].element.getAttribute("title")?.split("\n")[0])
+        : "";
       clearHints();
       setMode("normal");
+      relayHintComplete();
       activate();
+      if (shouldOpenMeetingCardHints) {
+        void openMeetingCardHints(meetingTitle);
+      }
     } else if (!matches.length) {
       clearHints();
       setMode("normal");
@@ -1095,7 +1382,14 @@ document
     const role = element.getAttribute("role");
     const tid = element.getAttribute("data-tid")?.toLowerCase() ?? "";
     const context = `${role ?? ""} ${tid} ${elementLabel(element)}`.toLowerCase();
-    if (/meeting|calendar/.test(context)) return "meeting";
+    if (
+      (IS_HOSTED_CALENDAR &&
+        element.matches("[role='button'][title]") &&
+        element.getAttribute("title")?.includes("\n")) ||
+      /meeting|calendar/.test(context)
+    ) {
+      return "meeting";
+    }
     if (/channel/.test(context)) return "channel";
     if (/chat|contact|person|conversation/.test(context)) return "chat";
     if (/filter/.test(context)) return "filter";
@@ -1186,6 +1480,25 @@ document
       }
     });
     return [...entries.values()];
+  }
+
+  function collectCalendarEntries() {
+    const entries = [];
+    const seen = new Set();
+    for (const element of document.querySelectorAll("[role='button'][title]")) {
+      if (!element.getAttribute("title")?.includes("\n")) continue;
+      const label = elementLabel(element);
+      if (!label || seen.has(label)) continue;
+      seen.add(label);
+      entries.push({
+        element,
+        label,
+        kind: "meeting",
+        searchText: `${label} meeting calendar`.toLocaleLowerCase(),
+        activate: () => activateElement(element),
+      });
+    }
+    return entries;
   }
 
   function collectVomnibarEntries(additionalEntries = []) {
@@ -1279,9 +1592,13 @@ document
     ui.vomnibarCount.textContent = "Loading…";
     ui.vomnibarList.replaceChildren();
     ui.vomnibarInput.focus();
-    const chatEntries = await collectVirtualizedChatEntries();
+    const additionalEntries = IS_HOSTED_CALENDAR
+      ? collectCalendarEntries()
+      : await collectVirtualizedChatEntries();
     if (request !== state.vomnibarRequest || state.mode !== "vomnibar") return;
-    state.vomnibarEntries = collectVomnibarEntries(chatEntries);
+    state.vomnibarEntries = IS_HOSTED_CALENDAR
+      ? additionalEntries
+      : collectVomnibarEntries(additionalEntries);
     renderVomnibar();
     ui.vomnibarInput.focus();
   }
@@ -1306,8 +1623,10 @@ document
     }
     if (state.pendingNavigationKey === key) {
       clearPendingNavigation();
-      if (key === "[") history.back();
-      else history.forward();
+      if (!navigateCalendarPeriod(key === "[" ? -1 : 1)) {
+        if (key === "[") history.back();
+        else history.forward();
+      }
       return true;
     }
     clearPendingNavigation();
@@ -1324,13 +1643,76 @@ document
     event.stopImmediatePropagation();
   }
 
+  function relayKey(event) {
+    if (
+      state.relayedKey ||
+      typeof globalThis.__teamsVimiumRelay !== "function"
+    ) {
+      return;
+    }
+    globalThis.__teamsVimiumRelay(
+      JSON.stringify({
+        type: "key",
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      })
+    );
+  }
+
+  function relayHintComplete() {
+    if (typeof globalThis.__teamsVimiumRelay !== "function") return;
+    globalThis.__teamsVimiumRelay(
+      JSON.stringify({ type: "hint-complete" })
+    );
+  }
+
+  function relayCalendarVomnibar() {
+    if (typeof globalThis.__teamsVimiumRelay !== "function") return;
+    globalThis.__teamsVimiumRelay(
+      JSON.stringify({ type: "calendar-vomnibar" })
+    );
+  }
+
+  function hostsVisibleCalendar() {
+    return [...document.querySelectorAll("iframe")].some(iframe => {
+      const rect = iframe.getBoundingClientRect();
+      return (
+        iframe.src.startsWith("https://outlook.office.com/hosted/calendar/") &&
+        rect.width > 0 &&
+        rect.height > 0
+      );
+    });
+  }
+
+  function openContextVomnibar() {
+    if (!IS_HOSTED_CALENDAR && hostsVisibleCalendar()) {
+      relayCalendarVomnibar();
+      return;
+    }
+    void openVomnibar();
+  }
+
   function handleGlobalKeydown(event) {
     if (event.defaultPrevented || event.isComposing) return;
     const key = event.key;
 
     if (key === "Escape") {
+      relayKey(event);
+      state.hintRelayKeysRemaining = 0;
       prevent(event);
       enterNormalMode();
+      return;
+    }
+
+    if (state.mode !== "hint" && state.hintRelayKeysRemaining > 0) {
+      relayKey(event);
+      if (/^[a-z0-9]$/i.test(key)) {
+        state.hintRelayKeysRemaining--;
+      }
+      prevent(event);
       return;
     }
 
@@ -1345,6 +1727,12 @@ document
     }
 
     if (state.mode === "hint") {
+      if (state.hintRelayKeysRemaining > 0) {
+        relayKey(event);
+        if (/^[a-z0-9]$/i.test(key)) {
+          state.hintRelayKeysRemaining--;
+        }
+      }
       prevent(event);
       handleHintKey(key);
       return;
@@ -1376,12 +1764,20 @@ document
     if (isTextInput(event.target) || state.mode === "insert") return;
     if (event.metaKey || event.altKey) return;
 
+    if (key.toLowerCase() === "f") {
+      state.hintRelayKeysRemaining = 3;
+      relayKey(event);
+    }
+
     if (handleNavigationSequence(key)) {
       prevent(event);
       return;
     }
 
-    if (key === "Enter" && activateChatSelection()) {
+    if (
+      key === "Enter" &&
+      (activateCalendarSelection() || activateChatSelection())
+    ) {
       prevent(event);
       return;
     }
@@ -1399,8 +1795,14 @@ document
     }
 
     const actions = {
-      j: () => navigateVertically(1, SCROLL_STEP),
-      k: () => navigateVertically(-1, -SCROLL_STEP),
+      j: () =>
+        IS_HOSTED_CALENDAR
+          ? moveCalendarSelection(0, 1)
+          : navigateVertically(1, SCROLL_STEP),
+      k: () =>
+        IS_HOSTED_CALENDAR
+          ? moveCalendarSelection(0, -1)
+          : navigateVertically(-1, -SCROLL_STEP),
       d: () =>
         navigateVertically(
           1,
@@ -1413,15 +1815,21 @@ document
           -innerHeight / 2,
           Math.max(1, Math.floor(visibleChatRows().length / 2))
         ),
-      h: () => selectPane(-1),
-      l: () => selectPane(1),
+      h: () =>
+        IS_HOSTED_CALENDAR
+          ? moveCalendarSelection(-1, 0)
+          : selectPane(-1),
+      l: () =>
+        IS_HOSTED_CALENDAR
+          ? moveCalendarSelection(1, 0)
+          : selectPane(1),
       x: closeTopOverlay,
       i: focusMainTextBox,
       "/": openFind,
       n: () => nextFind(1),
       N: () => nextFind(-1),
       f: openHints,
-      o: openVomnibar,
+      o: openContextVomnibar,
       "?": openHelp,
     };
     const action = actions[key] ?? actions[lowerKey];
@@ -1488,7 +1896,9 @@ document
   listen(ui.helpBackdrop, "click", event => {
     if (event.target === ui.helpBackdrop) leaveOverlayMode();
   });
-  listen(window, "blur", clearHints);
+  listen(window, "blur", () => {
+    if (state.hintRelayKeysRemaining === 0) clearHints();
+  });
   listen(window, "resize", () => {
     if (state.mode === "hint") openHints();
   });
@@ -1497,6 +1907,30 @@ document
   setMode("normal");
 
   globalThis.__teamsVimium = {
+    receiveRelayedKey(payload) {
+      const eventData = JSON.parse(payload);
+      if (eventData.type === "hint-complete") {
+        state.hintRelayKeysRemaining = 0;
+        if (state.mode === "hint") leaveOverlayMode();
+        return;
+      }
+      if (eventData.type === "calendar-vomnibar") {
+        if (IS_HOSTED_CALENDAR) void openVomnibar();
+        return;
+      }
+      state.relayedKey = true;
+      try {
+        handleGlobalKeydown(
+          new KeyboardEvent("keydown", {
+            ...eventData,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+      } finally {
+        state.relayedKey = false;
+      }
+    },
     destroy() {
       clearFind();
       clearHints();

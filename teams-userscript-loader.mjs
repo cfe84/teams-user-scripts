@@ -17,6 +17,7 @@ const requestedHost = option("--host", null);
 const pollIntervalMs = Number(option("--poll-ms", "1000"));
 const hosts = requestedHost ? [requestedHost] : ["127.0.0.1", "[::1]"];
 const connections = new Map();
+const relayBindingName = "__teamsVimiumRelay";
 let scripts = [];
 let scriptsRevision = 0;
 let reloadTimer;
@@ -90,10 +91,14 @@ function scriptApplies(script, url) {
   );
 }
 
+function scriptKey(script) {
+  return `${script.name}:${script.hash}`;
+}
+
 function wrappedSource(script) {
   const includeSources = script.includes.map(pattern => pattern.source);
   const excludeSources = script.excludes.map(pattern => pattern.source);
-  const key = `${script.name}:${script.hash}`;
+  const key = scriptKey(script);
   const execute = `() => {
     const registry = globalThis.__teamsUserscriptLoader ??= new Set();
     if (registry.has(${JSON.stringify(key)})) return;
@@ -103,6 +108,7 @@ ${script.source}
     } catch (error) {
       console.error(${JSON.stringify(`[userscript] ${script.name}`)}, error);
     }
+
   }`;
 
   let schedule;
@@ -129,6 +135,33 @@ ${script.source}
   //# sourceURL=teams-userscript://${encodeURIComponent(script.name)}.user.js`;
 }
 
+async function ensureScripts(connection, target) {
+  for (const script of scripts) {
+    if (!scriptApplies(script, target.url)) continue;
+    const key = scriptKey(script);
+    const status = await connection.send("Runtime.evaluate", {
+      expression: `globalThis.__teamsUserscriptLoader?.has(${JSON.stringify(
+        key
+      )}) === true`,
+      returnByValue: true,
+    });
+    if (status.result?.value === true) continue;
+    const result = await connection.send("Runtime.evaluate", {
+      expression: wrappedSource(script),
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (result.exceptionDetails) {
+      console.error(
+        `Failed to restore "${script.name}" in "${target.title}":`,
+        result.exceptionDetails.text
+      );
+    } else {
+      console.log(`Restored "${script.name}" in "${target.title}"`);
+    }
+  }
+}
+
 async function fetchTargets() {
   const errors = [];
 
@@ -146,7 +179,14 @@ async function fetchTargets() {
       ) {
         return {
           host,
-          targets: targets.filter(target => target.type === "page"),
+          targets: targets.filter(
+            target =>
+              target.type === "page" ||
+              (target.type === "iframe" &&
+                target.url.startsWith(
+                  "https://outlook.office.com/hosted/calendar/"
+                ))
+          ),
         };
       }
     } catch (error) {
@@ -155,6 +195,21 @@ async function fetchTargets() {
   }
 
   throw new Error(errors.join("; "));
+}
+
+function relayUserscriptKey(sourceConnection, payload) {
+  const expression = `globalThis.__teamsVimium?.receiveRelayedKey(${JSON.stringify(
+    payload
+  )})`;
+  for (const connection of connections.values()) {
+    if (
+      connection === sourceConnection ||
+      connection.socket.readyState !== WebSocket.OPEN
+    ) {
+      continue;
+    }
+    void connection.send("Runtime.evaluate", { expression }).catch(() => {});
+  }
 }
 
 function connect(webSocketUrl) {
@@ -190,6 +245,13 @@ function connect(webSocketUrl) {
     };
     socket.onmessage = event => {
       const message = JSON.parse(event.data);
+      if (
+        message.method === "Runtime.bindingCalled" &&
+        message.params?.name === relayBindingName
+      ) {
+        relayUserscriptKey(connection, message.params.payload);
+        return;
+      }
       const request = pending.get(message.id);
       if (!request) return;
       clearTimeout(request.timeout);
@@ -222,6 +284,10 @@ async function installScripts(connection, target) {
       .catch(() => {});
   }
   connection.registrationIds = [];
+  await connection.send("Runtime.enable");
+  await connection
+    .send("Runtime.addBinding", { name: relayBindingName })
+    .catch(() => {});
   await connection.send("Page.enable");
 
   for (const script of scripts) {
@@ -253,10 +319,12 @@ async function installScripts(connection, target) {
 
 async function reconcile() {
   const { host, targets } = await fetchTargets();
-  const matchingTargets = targets.filter(target =>
-    `${target.title} ${target.url}`
-      .toLowerCase()
-      .includes(targetFilter.toLowerCase())
+  const matchingTargets = targets.filter(
+    target =>
+      `${target.title} ${target.url}`
+        .toLowerCase()
+        .includes(targetFilter.toLowerCase()) ||
+      target.url.startsWith("https://outlook.office.com/hosted/calendar/")
   );
   const liveTargetIds = new Set(matchingTargets.map(target => target.id));
 
@@ -283,6 +351,8 @@ async function reconcile() {
     }
     if (connection.revision !== scriptsRevision) {
       await installScripts(connection, target);
+    } else {
+      await ensureScripts(connection, target);
     }
   }
 }
