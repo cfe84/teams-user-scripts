@@ -4,6 +4,7 @@
 // @match        https://teams.cloud.microsoft/*
 // @match        https://local.teams.office.com/*
 // @match        https://outlook.office.com/hosted/calendar/*
+// @match        https://onedrive.cloud.microsoft/*
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -327,7 +328,7 @@ document
     ["i", "Focus main text box"],
     ["/", "Find text"],
     ["n / N", "Next / previous find"],
-    ["f", "Open link hints"],
+    ["f / Ctrl+F", "Open link hints"],
     ["o", "Open vomnibar"],
     ["?", "Toggle this help"],
     ["Up / Down", "Navigate vomnibar"],
@@ -391,7 +392,7 @@ document
       style.display === "none" ||
       style.visibility === "hidden" ||
       style.pointerEvents === "none" ||
-      Number(style.opacity) === 0
+      (Number(style.opacity) === 0 && !element.matches("[role='switch']"))
     ) {
       return false;
     }
@@ -1735,6 +1736,21 @@ document
       state.hintRelayKeysRemaining = 0;
       prevent(event);
       enterNormalMode();
+      return;
+    }
+
+    if (
+      event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      key.toLowerCase() === "f"
+    ) {
+      state.hintRelayKeysRemaining = 3;
+      relayKey(event);
+      prevent(event);
+      enterNormalMode();
+      openHints();
       return;
     }
 

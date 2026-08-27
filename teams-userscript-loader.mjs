@@ -103,15 +103,20 @@ function isHostedCalendarTarget(target) {
   );
 }
 
-function hintContext(target, targets) {
+function hintContext(target, targets, eligibleTargetIds) {
   const hostedCalendar = isHostedCalendarTarget(target);
   const peers = targets
-    .filter(candidate => isHostedCalendarTarget(candidate) === hostedCalendar)
+    .filter(
+      candidate =>
+        eligibleTargetIds.has(candidate.id) &&
+        isHostedCalendarTarget(candidate) === hostedCalendar
+    )
     .sort((left, right) => left.id.localeCompare(right.id));
+  const index = peers.findIndex(candidate => candidate.id === target.id);
 
   return {
-    index: peers.findIndex(candidate => candidate.id === target.id),
-    count: peers.length,
+    index: Math.max(0, index),
+    count: Math.max(1, peers.length),
   };
 }
 
@@ -243,10 +248,7 @@ async function fetchTargets() {
           targets: targets.filter(
             target =>
               target.type === "page" ||
-              (target.type === "iframe" &&
-                target.url.startsWith(
-                  "https://outlook.office.com/hosted/calendar/"
-                ))
+              target.type === "iframe"
           ),
         };
       }
@@ -404,7 +406,7 @@ async function reconcile() {
       `${target.title} ${target.url}`
         .toLowerCase()
         .includes(targetFilter.toLowerCase()) ||
-      target.url.startsWith("https://outlook.office.com/hosted/calendar/")
+      scripts.some(script => scriptApplies(script, target.url))
   );
   const liveTargetIds = new Set(matchingTargets.map(target => target.id));
 
@@ -419,8 +421,6 @@ async function reconcile() {
   }
 
   for (const target of matchingTargets) {
-    const context = hintContext(target, matchingTargets);
-    const contextSignature = JSON.stringify(context);
     let connection = connections.get(target.id);
     if (!connection) {
       const url = target.webSocketDebuggerUrl.replace(
@@ -431,6 +431,31 @@ async function reconcile() {
       connections.set(target.id, connection);
       console.log(`Attached to "${target.title}" (${target.url})`);
     }
+  }
+
+  const eligibleTargetIds = new Set();
+  await Promise.all(
+    matchingTargets.map(async target => {
+      const connection = connections.get(target.id);
+      const result = await connection.send("Runtime.evaluate", {
+        expression: `document.visibilityState === "visible" &&
+          Boolean(document.querySelector(
+            "a[href], button, input:not([type='hidden']), select, textarea, [contenteditable='true'], [role='button'], [role='link'], [role='switch'], [role='tab'], [role='textbox']"
+          ))`,
+        returnByValue: true,
+      });
+      if (result.result?.value === true) eligibleTargetIds.add(target.id);
+    })
+  );
+
+  for (const target of matchingTargets) {
+    const connection = connections.get(target.id);
+    const context = hintContext(
+      target,
+      matchingTargets,
+      eligibleTargetIds
+    );
+    const contextSignature = JSON.stringify(context);
     if (
       connection.revision !== scriptsRevision ||
       connection.hintContext !== contextSignature
