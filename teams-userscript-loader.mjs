@@ -97,6 +97,28 @@ function scriptKey(script) {
   return `${script.name}:${script.hash}`;
 }
 
+function isHostedCalendarTarget(target) {
+  return target.url.startsWith(
+    "https://outlook.office.com/hosted/calendar/"
+  );
+}
+
+function hintContext(target, targets) {
+  const hostedCalendar = isHostedCalendarTarget(target);
+  const peers = targets
+    .filter(candidate => isHostedCalendarTarget(candidate) === hostedCalendar)
+    .sort((left, right) => left.id.localeCompare(right.id));
+
+  return {
+    index: peers.findIndex(candidate => candidate.id === target.id),
+    count: peers.length,
+  };
+}
+
+function hintContextSource(context) {
+  return `globalThis.__teamsVimiumHintContext = ${JSON.stringify(context)}`;
+}
+
 function wrappedSource(script) {
   const includeSources = script.includes.map(pattern => pattern.source);
   const excludeSources = script.excludes.map(pattern => pattern.source);
@@ -168,7 +190,10 @@ function userscriptManifestSource() {
     .map(({ name, toggleable }) => ({ name, toggleable }))`;
 }
 
-async function ensureScripts(connection, target) {
+async function ensureScripts(connection, target, context) {
+  await connection.send("Runtime.evaluate", {
+    expression: hintContextSource(context),
+  });
   await connection.send("Runtime.evaluate", {
     expression: userscriptManifestSource(),
   });
@@ -311,7 +336,7 @@ function connect(webSocketUrl) {
   });
 }
 
-async function installScripts(connection, target) {
+async function installScripts(connection, target, context) {
   for (const registrationId of connection.registrationIds) {
     await connection
       .send("Page.removeScriptToEvaluateOnNewDocument", {
@@ -325,6 +350,15 @@ async function installScripts(connection, target) {
     .send("Runtime.addBinding", { name: relayBindingName })
     .catch(() => {});
   await connection.send("Page.enable");
+  const contextSource = hintContextSource(context);
+  const contextRegistration = await connection.send(
+    "Page.addScriptToEvaluateOnNewDocument",
+    { source: contextSource }
+  );
+  connection.registrationIds.push(contextRegistration.identifier);
+  await connection.send("Runtime.evaluate", {
+    expression: contextSource,
+  });
   const manifestSource = userscriptManifestSource();
   const manifestRegistration = await connection.send(
     "Page.addScriptToEvaluateOnNewDocument",
@@ -360,6 +394,7 @@ async function installScripts(connection, target) {
     }
   }
   connection.revision = scriptsRevision;
+  connection.hintContext = JSON.stringify(context);
 }
 
 async function reconcile() {
@@ -384,6 +419,8 @@ async function reconcile() {
   }
 
   for (const target of matchingTargets) {
+    const context = hintContext(target, matchingTargets);
+    const contextSignature = JSON.stringify(context);
     let connection = connections.get(target.id);
     if (!connection) {
       const url = target.webSocketDebuggerUrl.replace(
@@ -394,10 +431,13 @@ async function reconcile() {
       connections.set(target.id, connection);
       console.log(`Attached to "${target.title}" (${target.url})`);
     }
-    if (connection.revision !== scriptsRevision) {
-      await installScripts(connection, target);
+    if (
+      connection.revision !== scriptsRevision ||
+      connection.hintContext !== contextSignature
+    ) {
+      await installScripts(connection, target, context);
     } else {
-      await ensureScripts(connection, target);
+      await ensureScripts(connection, target, context);
     }
   }
 }

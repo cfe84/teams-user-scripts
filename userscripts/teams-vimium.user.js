@@ -22,7 +22,7 @@ document
   const IS_HOSTED_CALENDAR =
     location.hostname === "outlook.office.com" &&
     location.pathname.startsWith("/hosted/calendar/");
-  const HINT_FIRST_KEYS = IS_HOSTED_CALENDAR
+  const BASE_HINT_FIRST_KEYS = IS_HOSTED_CALENDAR
     ? HINT_KEYS.slice(Math.ceil(HINT_KEYS.length / 2))
     : HINT_KEYS.slice(0, Math.ceil(HINT_KEYS.length / 2));
   const CLICKABLE_SELECTOR = [
@@ -978,8 +978,27 @@ document
     );
   }
 
-  function hintCode(index) {
-    return `${HINT_FIRST_KEYS[Math.floor(index / HINT_KEYS.length)]}${
+  function hintFirstKeys() {
+    const context = globalThis.__teamsVimiumHintContext ?? {
+      index: 0,
+      count: 1,
+    };
+    return [...BASE_HINT_FIRST_KEYS].filter(
+      (_, keyIndex) => keyIndex % context.count === context.index
+    );
+  }
+
+  function hintCode(index, useLongCodes) {
+    const firstKeys = hintFirstKeys();
+    if (useLongCodes) {
+      const suffixCapacity = HINT_KEYS.length * HINT_KEYS.length;
+      return `${
+        firstKeys[Math.floor(index / suffixCapacity)]
+      }${HINT_KEYS[Math.floor(index / HINT_KEYS.length) % HINT_KEYS.length]}${
+        HINT_KEYS[index % HINT_KEYS.length]
+      }`;
+    }
+    return `${firstKeys[Math.floor(index / HINT_KEYS.length)]}${
       HINT_KEYS[index % HINT_KEYS.length]
     }`;
   }
@@ -1302,10 +1321,15 @@ document
     leaveOverlayMode();
     const targets = clickableElements(scope).map(hintTarget);
     if (!targets.length) return;
-    if (targets.length > HINT_FIRST_KEYS.length * HINT_KEYS.length) {
-      console.warn("Too many targets for two-character Teams Vimium hints");
+    const firstKeyCount = hintFirstKeys().length;
+    const twoCharacterCapacity = firstKeyCount * HINT_KEYS.length;
+    const threeCharacterCapacity =
+      twoCharacterCapacity * HINT_KEYS.length;
+    if (!firstKeyCount || targets.length > threeCharacterCapacity) {
+      console.warn("Too many targets for Teams Vimium hints");
       return;
     }
+    const useLongCodes = targets.length > twoCharacterCapacity;
     setMode("hint");
     const calendarDayIndexes = new Map();
     let generatedCodeIndex = 0;
@@ -1315,21 +1339,28 @@ document
       label.className = "hint";
       let code;
       if (target.calendarDay) {
+        const hintContext = globalThis.__teamsVimiumHintContext ?? {
+          index: 0,
+          count: 1,
+        };
+        const windowSuffix =
+          hintContext.count > 1 ? HINT_KEYS[hintContext.index] : "";
         if (target.calendarDayPrimary) {
           code =
             target.calendarDay <= 3
               ? String(target.calendarDay).padStart(2, "0")
               : String(target.calendarDay);
+          code += windowSuffix;
         } else {
           const conflictIndex =
             calendarDayIndexes.get(target.calendarDay) ?? 0;
           calendarDayIndexes.set(target.calendarDay, conflictIndex + 1);
           code = `${target.calendarDay}${String.fromCharCode(
             "a".charCodeAt(0) + conflictIndex
-          )}`;
+          )}${windowSuffix}`;
         }
       } else {
-        code = hintCode(generatedCodeIndex++);
+        code = hintCode(generatedCodeIndex++, useLongCodes);
       }
       label.textContent = code;
       if (target.centre) {
