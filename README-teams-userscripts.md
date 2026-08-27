@@ -127,6 +127,12 @@ title-bar ring badge. Enabling it sets
 Either action uses the ring popover's **Restart (also exits container)** control
 so the setting takes effect.
 
+`userscripts/teams-user-extensions.user.js` adds **User extensions** to the
+Settings and more menu. Its modal lists matching userscripts and lets each one
+be enabled or disabled. The choice is stored in `teams.userscripts.disabled`
+and applied by restarting Teams. The extension manager itself cannot be
+disabled.
+
 Supported metadata is intentionally small:
 
 ```javascript
@@ -138,10 +144,12 @@ Supported metadata is intentionally small:
 // ==/UserScript==
 ```
 
-`@match`, `@include`, `@exclude-match`, `@exclude`, and `@run-at` are supported.
-The matcher is wildcard-based, not a complete implementation of the browser
-match-pattern grammar. There are no `GM_*` APIs, extension background workers,
-extension storage, or privileged network requests.
+`@match`, `@include`, `@exclude-match`, `@exclude`, `@run-at`, and
+`@toggleable` are supported. Set `@toggleable false` for infrastructure scripts
+that must remain enabled. The matcher is wildcard-based, not a complete
+implementation of the browser match-pattern grammar. There are no `GM_*` APIs,
+extension background workers, extension storage, or privileged network
+requests.
 
 ## 3. Cleanup
 

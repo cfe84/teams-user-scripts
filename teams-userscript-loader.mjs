@@ -18,6 +18,7 @@ const pollIntervalMs = Number(option("--poll-ms", "1000"));
 const hosts = requestedHost ? [requestedHost] : ["127.0.0.1", "[::1]"];
 const connections = new Map();
 const relayBindingName = "__teamsVimiumRelay";
+const disabledScriptsStorageKey = "teams.userscripts.disabled";
 let scripts = [];
 let scriptsRevision = 0;
 let reloadTimer;
@@ -70,6 +71,7 @@ function loadScripts() {
         source,
         hash: createHash("sha256").update(source).digest("hex").slice(0, 12),
         runAt: metadata.get("run-at")?.[0] ?? "document-idle",
+        toggleable: metadata.get("toggleable")?.[0] !== "false",
         includes: (includes.length ? includes : ["https://teams.*/*"]).map(
           wildcardToRegExp
         ),
@@ -130,12 +132,46 @@ ${script.source}
     const excludes = ${JSON.stringify(excludeSources)}.map(value => new RegExp(value));
     if (!includes.some(pattern => pattern.test(url)) ||
         excludes.some(pattern => pattern.test(url))) return;
+    let disabledScripts = [];
+    try {
+      disabledScripts = JSON.parse(
+        localStorage.getItem(${JSON.stringify(disabledScriptsStorageKey)}) ?? "[]"
+      );
+    } catch (error) {
+      console.error("[userscript] Could not read disabled extensions", error);
+    }
+    if (${script.toggleable} && disabledScripts.includes(${JSON.stringify(
+      script.name
+    )})) {
+      (globalThis.__teamsUserscriptLoader ??= new Set()).add(${JSON.stringify(
+        scriptKey(script)
+      )});
+      return;
+    }
     ${schedule};
   })();
   //# sourceURL=teams-userscript://${encodeURIComponent(script.name)}.user.js`;
 }
 
+function userscriptManifestSource() {
+  const manifest = scripts.map(script => ({
+      name: script.name,
+      toggleable: script.toggleable,
+      includes: script.includes.map(pattern => pattern.source),
+      excludes: script.excludes.map(pattern => pattern.source),
+    }));
+  return `globalThis.__teamsUserscriptManifest = ${JSON.stringify(manifest)}
+    .filter(extension =>
+      extension.includes.some(value => new RegExp(value).test(location.href)) &&
+      !extension.excludes.some(value => new RegExp(value).test(location.href))
+    )
+    .map(({ name, toggleable }) => ({ name, toggleable }))`;
+}
+
 async function ensureScripts(connection, target) {
+  await connection.send("Runtime.evaluate", {
+    expression: userscriptManifestSource(),
+  });
   for (const script of scripts) {
     if (!scriptApplies(script, target.url)) continue;
     const key = scriptKey(script);
@@ -289,6 +325,15 @@ async function installScripts(connection, target) {
     .send("Runtime.addBinding", { name: relayBindingName })
     .catch(() => {});
   await connection.send("Page.enable");
+  const manifestSource = userscriptManifestSource();
+  const manifestRegistration = await connection.send(
+    "Page.addScriptToEvaluateOnNewDocument",
+    { source: manifestSource }
+  );
+  connection.registrationIds.push(manifestRegistration.identifier);
+  await connection.send("Runtime.evaluate", {
+    expression: manifestSource,
+  });
 
   for (const script of scripts) {
     const source = wrappedSource(script);
