@@ -5,6 +5,7 @@
 // @match        https://local.teams.office.com/*
 // @match        https://outlook.office.com/hosted/calendar/*
 // @match        https://onedrive.cloud.microsoft/*
+// @match        https://m365copilotapp.svc.cloud.microsoft/*
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -23,6 +24,7 @@ document
   const IS_HOSTED_CALENDAR =
     location.hostname === "outlook.office.com" &&
     location.pathname.startsWith("/hosted/calendar/");
+  const SHOW_MODE_INDICATOR = window.top === window;
   const BASE_HINT_FIRST_KEYS = IS_HOSTED_CALENDAR
     ? HINT_KEYS.slice(Math.ceil(HINT_KEYS.length / 2))
     : HINT_KEYS.slice(0, Math.ceil(HINT_KEYS.length / 2));
@@ -260,7 +262,7 @@ document
 
   const mode = createElement("div", {
     id: "mode",
-    className: "mode",
+    className: `mode${SHOW_MODE_INDICATOR ? "" : " hidden"}`,
     text: "NORMAL",
   });
   const findInput = createElement("input", {
@@ -465,7 +467,10 @@ document
   function setMode(mode) {
     state.mode = mode;
     ui.mode.textContent = mode.toUpperCase();
-    ui.mode.classList.toggle("hidden", mode !== "normal" && mode !== "insert");
+    ui.mode.classList.toggle(
+      "hidden",
+      !SHOW_MODE_INDICATOR || (mode !== "normal" && mode !== "insert")
+    );
   }
 
   function clearPendingNavigation() {
@@ -551,6 +556,26 @@ document
 
   function scrollByAmount(amount) {
     activeScroller()?.scrollBy({ top: amount, behavior: "smooth" });
+  }
+
+  function chatHistoryScroller() {
+    const messageView = document.querySelector(
+      "[data-tid='message-pane-layout'], [data-testid='message-pane-layout']"
+    );
+    if (messageView instanceof HTMLElement) {
+      const scroller = scrollableDescendant(messageView);
+      if (scroller) return scroller;
+    }
+    return activeScroller();
+  }
+
+  function scrollChatHistory(direction) {
+    const scroller = chatHistoryScroller();
+    if (!scroller) return;
+    scroller.scrollBy({
+      top: direction * Math.max(120, scroller.clientHeight * 0.75),
+      behavior: "smooth",
+    });
   }
 
   function isChatListActive() {
@@ -1804,6 +1829,19 @@ document
         prevent(event);
         selectVomnibarEntry();
       }
+      return;
+    }
+
+    if (
+      event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      (key.toLowerCase() === "j" || key.toLowerCase() === "k") &&
+      isTextInput(event.target)
+    ) {
+      prevent(event);
+      scrollChatHistory(key.toLowerCase() === "j" ? 1 : -1);
       return;
     }
 

@@ -130,8 +130,14 @@ so the setting takes effect.
 `userscripts/teams-user-extensions.user.js` adds **User extensions** to the
 Settings and more menu. Its modal lists matching userscripts and lets each one
 be enabled or disabled. The choice is stored in `teams.userscripts.disabled`
-and applied by restarting Teams. The extension manager itself cannot be
-disabled.
+and applied by restarting Teams. Scripts can expose a settings modal by
+registering a function in `globalThis.__teamsUserscriptSettings` under their
+metadata name. The extension manager shows a **Settings** link for registered
+scripts. The extension manager itself cannot be disabled.
+
+`userscripts/re-color.user.js` is an example settings-enabled script. Its
+Settings link opens a primary-colour picker, derives a secondary colour, and
+applies the palette to selected Teams navigation and chat elements.
 
 Supported metadata is intentionally small:
 

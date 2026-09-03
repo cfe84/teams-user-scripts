@@ -124,7 +124,7 @@ function hintContextSource(context) {
   return `globalThis.__teamsVimiumHintContext = ${JSON.stringify(context)}`;
 }
 
-function wrappedSource(script) {
+function wrappedSource(script, disabledScripts = []) {
   const includeSources = script.includes.map(pattern => pattern.source);
   const excludeSources = script.excludes.map(pattern => pattern.source);
   const key = scriptKey(script);
@@ -159,14 +159,7 @@ ${script.source}
     const excludes = ${JSON.stringify(excludeSources)}.map(value => new RegExp(value));
     if (!includes.some(pattern => pattern.test(url)) ||
         excludes.some(pattern => pattern.test(url))) return;
-    let disabledScripts = [];
-    try {
-      disabledScripts = JSON.parse(
-        localStorage.getItem(${JSON.stringify(disabledScriptsStorageKey)}) ?? "[]"
-      );
-    } catch (error) {
-      console.error("[userscript] Could not read disabled extensions", error);
-    }
+    const disabledScripts = ${JSON.stringify(disabledScripts)};
     if (${script.toggleable} && disabledScripts.includes(${JSON.stringify(
       script.name
     )})) {
@@ -195,7 +188,7 @@ function userscriptManifestSource() {
     .map(({ name, toggleable }) => ({ name, toggleable }))`;
 }
 
-async function ensureScripts(connection, target, context) {
+async function ensureScripts(connection, target, context, disabledScripts) {
   await connection.send("Runtime.evaluate", {
     expression: hintContextSource(context),
   });
@@ -213,7 +206,7 @@ async function ensureScripts(connection, target, context) {
     });
     if (status.result?.value === true) continue;
     const result = await connection.send("Runtime.evaluate", {
-      expression: wrappedSource(script),
+      expression: wrappedSource(script, disabledScripts),
       awaitPromise: true,
       returnByValue: true,
     });
@@ -338,7 +331,7 @@ function connect(webSocketUrl) {
   });
 }
 
-async function installScripts(connection, target, context) {
+async function installScripts(connection, target, context, disabledScripts) {
   for (const registrationId of connection.registrationIds) {
     await connection
       .send("Page.removeScriptToEvaluateOnNewDocument", {
@@ -372,7 +365,7 @@ async function installScripts(connection, target, context) {
   });
 
   for (const script of scripts) {
-    const source = wrappedSource(script);
+    const source = wrappedSource(script, disabledScripts);
     const registration = await connection.send(
       "Page.addScriptToEvaluateOnNewDocument",
       { source }
@@ -433,6 +426,31 @@ async function reconcile() {
     }
   }
 
+  let disabledScripts = [];
+  const teamsTarget = matchingTargets.find(
+    target => !isHostedCalendarTarget(target)
+  );
+  if (teamsTarget) {
+    const connection = connections.get(teamsTarget.id);
+    const result = await connection.send("Runtime.evaluate", {
+      expression: `(() => {
+        try {
+          const value = JSON.parse(
+            localStorage.getItem(${JSON.stringify(
+              disabledScriptsStorageKey
+            )}) ?? "[]"
+          );
+          return Array.isArray(value) ? value : [];
+        } catch (error) {
+          console.error("[userscript-loader] Could not read disabled extensions", error);
+          return [];
+        }
+      })()`,
+      returnByValue: true,
+    });
+    disabledScripts = result.result?.value ?? [];
+  }
+
   const eligibleTargetIds = new Set();
   await Promise.all(
     matchingTargets.map(async target => {
@@ -460,9 +478,9 @@ async function reconcile() {
       connection.revision !== scriptsRevision ||
       connection.hintContext !== contextSignature
     ) {
-      await installScripts(connection, target, context);
+      await installScripts(connection, target, context, disabledScripts);
     } else {
-      await ensureScripts(connection, target, context);
+      await ensureScripts(connection, target, context, disabledScripts);
     }
   }
 }

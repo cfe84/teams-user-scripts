@@ -66,6 +66,13 @@
     document.getElementById(MODAL_ID)?.remove();
   }
 
+  function openExtensionSettings(extension) {
+    const settings = globalThis.__teamsUserscriptSettings?.[extension.name];
+    if (typeof settings !== "function") return;
+    closeModal();
+    settings();
+  }
+
   function createSwitch(extension, enabled) {
     const control = document.createElement("button");
     control.type = "button";
@@ -202,7 +209,33 @@
         });
         const label = document.createElement("span");
         label.textContent = extension.name;
-        row.append(label, createSwitch(extension, enabled));
+        const actions = document.createElement("span");
+        Object.assign(actions.style, {
+          alignItems: "center",
+          display: "inline-flex",
+          gap: "12px",
+        });
+        const settings = globalThis.__teamsUserscriptSettings?.[extension.name];
+        if (typeof settings === "function") {
+          const settingsLink = document.createElement("button");
+          settingsLink.type = "button";
+          settingsLink.textContent = "Settings";
+          Object.assign(settingsLink.style, {
+            background: "transparent",
+            border: "0",
+            color: "var(--colorBrandForeground1, #5b5fc7)",
+            cursor: "pointer",
+            font: "inherit",
+            padding: "4px 0",
+            textDecoration: "underline",
+          });
+          settingsLink.addEventListener("click", () =>
+            openExtensionSettings(extension)
+          );
+          actions.append(settingsLink);
+        }
+        actions.append(createSwitch(extension, enabled));
+        row.append(label, actions);
         dialog.append(row);
       }
     }
