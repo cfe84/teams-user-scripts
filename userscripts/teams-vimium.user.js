@@ -1014,19 +1014,106 @@ document
     );
   }
 
-  function hintCode(index, useLongCodes) {
+  function hintCodes(targetCount) {
     const firstKeys = hintFirstKeys();
-    if (useLongCodes) {
-      const suffixCapacity = HINT_KEYS.length * HINT_KEYS.length;
-      return `${
-        firstKeys[Math.floor(index / suffixCapacity)]
-      }${HINT_KEYS[Math.floor(index / HINT_KEYS.length) % HINT_KEYS.length]}${
-        HINT_KEYS[index % HINT_KEYS.length]
-      }`;
+    const suffixCapacity = HINT_KEYS.length * HINT_KEYS.length;
+    let bestPlan;
+
+    for (
+      let oneCharacterCount = 0;
+      oneCharacterCount <= firstKeys.length;
+      oneCharacterCount++
+    ) {
+      const remaining = targetCount - oneCharacterCount;
+      if (remaining <= 0) {
+        bestPlan = {
+          oneCharacterCount: targetCount,
+          twoCharacterGroups: 0,
+          twoCharacterCount: 0,
+          threeCharacterCount: 0,
+        };
+        break;
+      }
+
+      const availableGroups = firstKeys.length - oneCharacterCount;
+      if (!availableGroups || remaining > availableGroups * suffixCapacity) {
+        continue;
+      }
+
+      for (
+        let twoCharacterGroups = 0;
+        twoCharacterGroups <= availableGroups;
+        twoCharacterGroups++
+      ) {
+        const twoCharacterCapacity = twoCharacterGroups * HINT_KEYS.length;
+        const threeCharacterGroups = availableGroups - twoCharacterGroups;
+        if (
+          remaining >
+          twoCharacterCapacity + threeCharacterGroups * suffixCapacity
+        ) {
+          continue;
+        }
+        const twoCharacterCount = Math.min(remaining, twoCharacterCapacity);
+        const threeCharacterCount = remaining - twoCharacterCount;
+        const plan = {
+          oneCharacterCount,
+          twoCharacterGroups,
+          twoCharacterCount,
+          threeCharacterCount,
+        };
+        const planCost =
+          oneCharacterCount +
+          twoCharacterCount * 2 +
+          threeCharacterCount * 3;
+        const bestCost = bestPlan
+          ? bestPlan.oneCharacterCount +
+            bestPlan.twoCharacterCount * 2 +
+            bestPlan.threeCharacterCount * 3
+          : Infinity;
+        if (!bestPlan || planCost < bestCost) {
+          bestPlan = plan;
+        }
+      }
     }
-    return `${firstKeys[Math.floor(index / HINT_KEYS.length)]}${
-      HINT_KEYS[index % HINT_KEYS.length]
-    }`;
+
+    if (!bestPlan) return [];
+
+    const codes = firstKeys
+      .slice(0, bestPlan.oneCharacterCount)
+      .slice(0, targetCount);
+    let remainingTwoCharacterCount = bestPlan.twoCharacterCount;
+    for (
+      let groupIndex = bestPlan.oneCharacterCount;
+      groupIndex < bestPlan.oneCharacterCount + bestPlan.twoCharacterGroups;
+      groupIndex++
+    ) {
+      for (const suffix of HINT_KEYS) {
+        if (!remainingTwoCharacterCount) break;
+        codes.push(`${firstKeys[groupIndex]}${suffix}`);
+        remainingTwoCharacterCount--;
+      }
+    }
+
+    let remainingThreeCharacterCount = bestPlan.threeCharacterCount;
+    for (
+      let groupIndex =
+        bestPlan.oneCharacterCount + bestPlan.twoCharacterGroups;
+      groupIndex < firstKeys.length;
+      groupIndex++
+    ) {
+      for (const firstSuffix of HINT_KEYS) {
+        for (const secondSuffix of HINT_KEYS) {
+          if (!remainingThreeCharacterCount) break;
+          codes.push(
+            `${firstKeys[groupIndex]}${firstSuffix}${secondSuffix}`
+          );
+          remainingThreeCharacterCount--;
+        }
+        if (!remainingThreeCharacterCount) break;
+      }
+      if (!remainingThreeCharacterCount) break;
+    }
+    return codes;
   }
 
   function clickableElements(scope = document) {
@@ -1347,15 +1434,12 @@ document
     leaveOverlayMode();
     const targets = clickableElements(scope).map(hintTarget);
     if (!targets.length) return;
-    const firstKeyCount = hintFirstKeys().length;
-    const twoCharacterCapacity = firstKeyCount * HINT_KEYS.length;
-    const threeCharacterCapacity =
-      twoCharacterCapacity * HINT_KEYS.length;
-    if (!firstKeyCount || targets.length > threeCharacterCapacity) {
+    const letterTargets = targets.filter(target => !target.calendarDay);
+    const codes = hintCodes(letterTargets.length);
+    if (letterTargets.length && !codes.length) {
       console.warn("Too many targets for Teams Vimium hints");
       return;
     }
-    const useLongCodes = targets.length > twoCharacterCapacity;
     setMode("hint");
     const calendarDayIndexes = new Map();
     let generatedCodeIndex = 0;
@@ -1386,7 +1470,7 @@ document
           )}${windowSuffix}`;
         }
       } else {
-        code = hintCode(generatedCodeIndex++, useLongCodes);
+        code = codes[generatedCodeIndex++];
       }
       label.textContent = code;
       if (target.centre) {
@@ -1421,6 +1505,7 @@ document
         : "";
       clearHints();
       setMode("normal");
+      state.hintRelayKeysRemaining = 0;
       relayHintComplete();
       activate();
       if (shouldOpenMeetingCardHints) {
@@ -1429,6 +1514,7 @@ document
     } else if (!matches.length) {
       clearHints();
       setMode("normal");
+      state.hintRelayKeysRemaining = 0;
     } else {
       renderHints();
     }

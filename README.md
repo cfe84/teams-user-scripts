@@ -139,6 +139,11 @@ scripts. The extension manager itself cannot be disabled.
 Settings link opens a primary-colour picker, derives a secondary colour, and
 applies the palette to selected Teams navigation and chat elements.
 
+`userscripts/meeting-meter.user.js` displays an estimated running meeting cost
+next to the call timer. It counts participants from the meeting roster control
+and uses a `$200,000 USD` fully loaded annual cost per participant, spread over
+2,080 working hours per year.
+
 Supported metadata is intentionally small:
 
 ```javascript
