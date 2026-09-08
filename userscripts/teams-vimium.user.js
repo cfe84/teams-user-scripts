@@ -63,6 +63,8 @@ document
     mode: "normal",
     pendingNavigationKey: "",
     pendingNavigationTimer: 0,
+    escapeScrollTimer: 0,
+    escapeScrollMode: false,
     activePane: null,
     activeChatRow: null,
     activeChatKey: null,
@@ -477,6 +479,12 @@ document
     clearTimeout(state.pendingNavigationTimer);
     state.pendingNavigationKey = "";
     state.pendingNavigationTimer = 0;
+  }
+
+  function clearEscapeScrollMode() {
+    clearTimeout(state.escapeScrollTimer);
+    state.escapeScrollTimer = 0;
+    state.escapeScrollMode = false;
   }
 
   function leaveOverlayMode({ preserveFind = true } = {}) {
@@ -1845,6 +1853,9 @@ document
     if (key === "Escape") {
       relayKey(event);
       state.hintRelayKeysRemaining = 0;
+      clearEscapeScrollMode();
+      state.escapeScrollMode = true;
+      state.escapeScrollTimer = setTimeout(clearEscapeScrollMode, 700);
       prevent(event);
       enterNormalMode();
       return;
@@ -1954,6 +1965,17 @@ document
     }
 
     const lowerKey = key.toLowerCase();
+    if (
+      state.escapeScrollMode &&
+      !event.ctrlKey &&
+      (lowerKey === "j" || lowerKey === "k")
+    ) {
+      clearEscapeScrollMode();
+      prevent(event);
+      scrollChatHistory(lowerKey === "j" ? 1 : -1);
+      return;
+    }
+    clearEscapeScrollMode();
     if (event.ctrlKey) {
       if (lowerKey === "e") {
         prevent(event);
