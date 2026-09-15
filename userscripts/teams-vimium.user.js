@@ -24,6 +24,8 @@ document
   const IS_HOSTED_CALENDAR =
     location.hostname === "outlook.office.com" &&
     location.pathname.startsWith("/hosted/calendar/");
+  const IS_COPILOT =
+    location.hostname === "m365copilotapp.svc.cloud.microsoft";
   const SHOW_MODE_INDICATOR = window.top === window;
   const BASE_HINT_FIRST_KEYS = IS_HOSTED_CALENDAR
     ? HINT_KEYS.slice(Math.ceil(HINT_KEYS.length / 2))
@@ -1125,6 +1127,8 @@ document
   }
 
   function clickableElements(scope = document) {
+    if (IS_COPILOT) return copilotClickableElements(scope);
+
     const candidates = new Set(scope.querySelectorAll(CLICKABLE_SELECTOR));
     for (const element of scope.querySelectorAll("*")) {
       if (getComputedStyle(element).cursor === "pointer") {
@@ -1190,6 +1194,51 @@ document
           folderHeader?.firstElementChild ??
           candidate
       );
+    }
+
+    const seenRects = new Set();
+    return [...normalisedCandidates].filter(element => {
+      if (
+        (scope instanceof Element && !scope.contains(element)) ||
+        !isVisible(element) ||
+        element.closest("[inert]")
+      ) {
+        return false;
+      }
+      const rect = element.getBoundingClientRect();
+      const key = `${Math.round(rect.left)}:${Math.round(rect.top)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
+      if (seenRects.has(key)) return false;
+      seenRects.add(key);
+      return true;
+    });
+  }
+
+  function copilotClickableElements(scope = document) {
+    const candidates = new Set(
+      scope.querySelectorAll(
+        [
+          "a[href]",
+          "button[aria-label]",
+          "[contenteditable='true']",
+          "[role='tab']",
+          "[role='textbox']",
+          "[role='option']",
+        ].join(",")
+      )
+    );
+    const normalisedCandidates = new Set();
+    for (const candidate of candidates) {
+      const ariaLabel = candidate.getAttribute("aria-label") ?? "";
+      if (
+        /^(Pin|More|Go to line|Copy code|Display options)$/i.test(ariaLabel) ||
+        candidate.closest("pre, [data-testid*='code' i]")
+      ) {
+        continue;
+      }
+      const navItem = candidate.closest(
+        "[role='treeitem'], [role='menuitem'], .fui-NavItem, .fui-NavSubItem"
+      );
+      normalisedCandidates.add(navItem ?? candidate);
     }
 
     const seenRects = new Set();

@@ -10,15 +10,17 @@
   globalThis.__teamsMeetingMeter?.destroy();
 
   const METER_ID = "teams-meeting-meter";
-  const PARTICIPANT_COST_USD = 200_000;
-  const WORKING_HOURS_PER_YEAR = 2_080;
-  const COST_PER_SECOND =
-    PARTICIPANT_COST_USD / (WORKING_HOURS_PER_YEAR * 60 * 60);
+  const PARTICIPANT_COST_USD_PER_HOUR = 148;
+  const COST_PER_SECOND = PARTICIPANT_COST_USD_PER_HOUR / (60 * 60);
 
   let totalCost = 0;
+  let totalParticipantSeconds = 0;
   let lastTick = performance.now();
   let currentParticipantCount = 0;
-  let meter;
+  let meetingDurationSeconds = 0;
+  let meterRoot;
+  let timeDisplay;
+  let costDisplay;
   let observer;
   let timer;
 
@@ -54,19 +56,32 @@
         : 0;
   }
 
+  function formatDuration(totalSeconds) {
+    const roundedSeconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(roundedSeconds / 60 / 60);
+    const minutes = Math.floor((roundedSeconds % (60 * 60)) / 60);
+    const seconds = roundedSeconds % 60;
+    return [hours, minutes, seconds]
+      .map(value => value.toString().padStart(2, "0"))
+      .join(":");
+  }
+
   function updateMeter() {
     const now = performance.now();
     totalCost +=
       ((now - lastTick) / 1000) *
       currentParticipantCount *
       COST_PER_SECOND;
+    totalParticipantSeconds +=
+      ((now - lastTick) / 1000) * currentParticipantCount;
     lastTick = now;
     currentParticipantCount = parseParticipantCount();
-    if (!meter) return;
-    meter.textContent = formatCost(totalCost);
-    meter.title = `${currentParticipantCount} participant${
+    if (!meterRoot) return;
+    timeDisplay.textContent = formatDuration(totalParticipantSeconds);
+    costDisplay.textContent = formatCost(totalCost);
+    meterRoot.title = `${currentParticipantCount} participant${
       currentParticipantCount === 1 ? "" : "s"
-    } at $${PARTICIPANT_COST_USD.toLocaleString("en-US")} fully loaded annual cost each`;
+    } at $${PARTICIPANT_COST_USD_PER_HOUR}/hour fully loaded cost each`;
   }
 
   function installMeter() {
@@ -74,29 +89,67 @@
     if (!duration?.parentElement) return;
     if (document.getElementById(METER_ID)) return;
 
-    meter = document.createElement("span");
-    meter.id = METER_ID;
-    meter.setAttribute("aria-label", "Estimated meeting cost");
-    Object.assign(meter.style, {
+    meetingDurationSeconds = parseDuration(duration.textContent ?? "");
+    currentParticipantCount = parseParticipantCount();
+    totalParticipantSeconds =
+      meetingDurationSeconds * currentParticipantCount;
+    totalCost =
+      meetingDurationSeconds * currentParticipantCount * COST_PER_SECOND;
+
+    meterRoot = document.createElement("span");
+    meterRoot.id = METER_ID;
+    meterRoot.setAttribute("aria-label", "Estimated meeting cost and person time");
+    Object.assign(meterRoot.style, {
+      alignItems: "center",
+      display: "inline-flex",
+      gap: "0",
+      marginInlineStart: "10px",
+      verticalAlign: "middle",
+    });
+
+    const labelDisplay = document.createElement("span");
+    labelDisplay.textContent = "Meeting cost:";
+    labelDisplay.setAttribute("aria-hidden", "true");
+    Object.assign(labelDisplay.style, {
       color: "var(--colorNeutralForeground2, #616161)",
       font: "inherit",
-      marginInlineStart: "8px",
       whiteSpace: "nowrap",
     });
-    duration.parentElement.append(meter);
-    currentParticipantCount = parseParticipantCount();
-    totalCost =
-      parseDuration(duration.textContent ?? "") *
-      currentParticipantCount *
-      COST_PER_SECOND;
+
+    timeDisplay = document.createElement("span");
+    timeDisplay.className = "teams-meeting-meter-time";
+    timeDisplay.setAttribute("aria-label", "Person time");
+    Object.assign(timeDisplay.style, {
+      color: "var(--colorNeutralForeground2, #616161)",
+      font: "inherit",
+      fontSize: "14px",
+      fontVariantNumeric: "tabular-nums",
+      flex: "0 0 60px",
+      marginInlineStart: "4px",
+      width: "60px",
+      whiteSpace: "nowrap",
+    });
+
+    costDisplay = document.createElement("span");
+    costDisplay.className = "teams-meeting-meter-cost";
+    costDisplay.setAttribute("aria-label", "Estimated meeting cost");
+    Object.assign(costDisplay.style, {
+      color: "var(--colorNeutralForeground2, #616161)",
+      font: "inherit",
+      fontVariantNumeric: "tabular-nums",
+      marginInlineStart: "12px",
+      whiteSpace: "nowrap",
+    });
+
+    meterRoot.append(labelDisplay, timeDisplay, costDisplay);
+    duration.parentElement.append(meterRoot);
     updateMeter();
   }
 
   installMeter();
-  timer = window.setInterval(updateMeter, 1000);
+  timer = window.setInterval(updateMeter, 100);
   observer = new MutationObserver(() => {
     installMeter();
-    currentParticipantCount = parseParticipantCount();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
@@ -104,7 +157,7 @@
     destroy() {
       observer?.disconnect();
       window.clearInterval(timer);
-      meter?.remove();
+      meterRoot?.remove();
       delete globalThis.__teamsMeetingMeter;
     },
   };
