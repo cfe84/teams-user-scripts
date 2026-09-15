@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name         Teams CS dev toggle
+// @version      1.0.0
 // @match        https://teams.microsoft.com/v2/*
 // @match        https://teams.cloud.microsoft/v2/*
 // @match        https://local.teams.office.com/v2/*

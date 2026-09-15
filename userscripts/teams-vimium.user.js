@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name         Teams Vimium navigation
+// @version      1.0.0
 // @match        https://teams.microsoft.com/*
 // @match        https://teams.cloud.microsoft/*
 // @match        https://local.teams.office.com/*
