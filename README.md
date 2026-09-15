@@ -23,8 +23,6 @@ Individual scripts are also available as raw files, for example:
 - **Teams Vimium navigation**: Vimium-style scrolling, pane selection, find,
   hints, and navigation for Teams.
 - **Meeting meter**: Tracks participant time and estimated meeting cost.
-- **Teams cs-dev toggle**: Toggles the conversation service development
-  endpoint from Teams.
 
 The `teams-user-extensions.user.js` manager is bundled with Teamsmonkey and is
 not downloaded from this repository.
