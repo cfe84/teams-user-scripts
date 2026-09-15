@@ -1,0 +1,27 @@
+{
+  "name": "Teams user scripts",
+  "description": "UserScripts for Microsoft Teams web.",
+  "extensions": [
+    {
+      "name": "Meeting meter",
+      "description": "Tracks participant time and estimated meeting cost.",
+      "path": "userscripts/meeting-meter.user.js",
+      "url": "https://github.com/cfe84/teams-user-scripts/raw/refs/heads/main/userscripts/meeting-meter.user.js",
+      "filename": "meeting-meter.user.js"
+    },
+    {
+      "name": "Teams cs-dev toggle",
+      "description": "Toggle the conversation service development endpoint from Teams.",
+      "path": "userscripts/teams-cs-dev-toggle.user.js",
+      "url": "https://github.com/cfe84/teams-user-scripts/raw/refs/heads/main/userscripts/teams-cs-dev-toggle.user.js",
+      "filename": "teams-cs-dev-toggle.user.js"
+    },
+    {
+      "name": "Teams Vimium navigation",
+      "description": "Vimium-style keyboard navigation for Teams.",
+      "path": "userscripts/teams-vimium.user.js",
+      "url": "https://github.com/cfe84/teams-user-scripts/raw/refs/heads/main/userscripts/teams-vimium.user.js",
+      "filename": "teams-vimium.user.js"
+    }
+  ]
+}
