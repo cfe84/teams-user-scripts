@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Teams Focus mode
-// @version      1.0.3
+// @version      1.0.4
 // @description  Reduce visual emphasis for unread messages and notifications.
 // @match        https://teams.microsoft.com/v2/*
 // @match        https://teams.cloud.microsoft/v2/*
@@ -28,7 +28,6 @@
     html[${ROOT_ATTRIBUTE}] [data-testid^="badge-count-indicator"],
     html[${ROOT_ATTRIBUTE}] [data-testid="dot-badge-container"],
     html[${ROOT_ATTRIBUTE}] [data-testid*="badge"],
-    html[${ROOT_ATTRIBUTE}] [data-id^="conversation-folder-header-"],
     html[${ROOT_ATTRIBUTE}] [class*="Badge"] {
       display: none !important;
     }
@@ -52,6 +51,10 @@
     html[${ROOT_ATTRIBUTE}] [data-testid="rail-jumper-toolbar-primary-button"][aria-label="Channels"] *,
     html[${ROOT_ATTRIBUTE}] [class*="RailJumperToolbarPrimaryButton"] {
       font-weight: 400 !important;
+    }
+
+    html[${ROOT_ATTRIBUTE}] [data-testid="simple-collab-rail"] {
+      filter: grayscale(1) !important;
     }
 
     html[${ROOT_ATTRIBUTE}] [data-testid^="simple-collab-left-rail-sticky-filter-toggle-button-"] [data-testid],

@@ -20,7 +20,7 @@
     },
     {
       "name": "Teams Focus mode",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "description": "Reduce visual emphasis for unread messages and notifications.",
       "path": "userscripts/teams-focus.user.js",
       "url": "https://github.com/cfe84/teams-user-scripts/raw/refs/heads/main/userscripts/teams-focus.user.js",
