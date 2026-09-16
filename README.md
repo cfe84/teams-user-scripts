@@ -23,6 +23,8 @@ Individual scripts are also available as raw files, for example:
 - **Teams Vimium navigation**: Vimium-style scrolling, pane selection, find,
   hints, and navigation for Teams.
 - **Meeting meter**: Tracks participant time and estimated meeting cost.
+- **Teams Focus mode**: Reduces visual emphasis for unread messages and
+  notifications while keeping their counts visible.
 
 The `teams-user-extensions.user.js` manager is bundled with Teamsmonkey and is
 not downloaded from this repository.
