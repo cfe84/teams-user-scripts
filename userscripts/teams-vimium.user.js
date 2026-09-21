@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         Teams Vimium navigation
-// @version      1.0.2
+// @version      1.0.5
 // @match        https://teams.microsoft.com/*
 // @match        https://teams.cloud.microsoft/*
 // @match        https://local.teams.office.com/*
 // @match        https://outlook.office.com/hosted/calendar/*
+// @match        https://outlook.office365.com/hosted/calendar/*
+// @match        https://outlook.cloud.microsoft/hosted/calendar/*
 // @match        https://onedrive.cloud.microsoft/*
 // @match        https://m365copilotapp.svc.cloud.microsoft/*
+// @match        https://m365copilotapp.cloud.microsoft/*
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -23,10 +26,13 @@ document
   const NAVIGATION_SEQUENCE_TIMEOUT = 700;
   const SCROLL_STEP = 80;
   const IS_HOSTED_CALENDAR =
-    location.hostname === "outlook.office.com" &&
-    location.pathname.startsWith("/hosted/calendar/");
-  const IS_COPILOT =
-    location.hostname === "m365copilotapp.svc.cloud.microsoft";
+    location.pathname.startsWith("/hosted/calendar/") &&
+    /^outlook(?:\.office(?:365)?|\.cloud)\.microsoft$/i.test(
+      location.hostname
+    );
+  const IS_COPILOT = /(?:^|\.)(?:m365)?copilotapp(?:\.svc)?\.cloud\.microsoft$/i.test(
+    location.hostname
+  );
   const SHOW_MODE_INDICATOR = window.top === window;
   const BASE_HINT_FIRST_KEYS = IS_HOSTED_CALENDAR
     ? HINT_KEYS.slice(Math.ceil(HINT_KEYS.length / 2))
@@ -424,6 +430,18 @@ document
 
   function normaliseText(value) {
     return value?.replace(/\s+/g, " ").trim() ?? "";
+  }
+
+  function isPrejoinView() {
+    return [...document.querySelectorAll("button, [role='button']")].some(
+      element => {
+        if (!isVisible(element)) return false;
+        const label = normaliseText(
+          element.getAttribute("aria-label") || element.textContent
+        ).toLowerCase();
+        return label === "join now" || label === "join meeting";
+      }
+    );
   }
 
   function elementLabel(element) {
@@ -1884,7 +1902,9 @@ document
     return [...document.querySelectorAll("iframe")].some(iframe => {
       const rect = iframe.getBoundingClientRect();
       return (
-        iframe.src.startsWith("https://outlook.office.com/hosted/calendar/") &&
+        /^https:\/\/outlook(?:\.office(?:365)?|\.cloud)\.microsoft\/hosted\/calendar\//i.test(
+          iframe.src
+        ) &&
         rect.width > 0 &&
         rect.height > 0
       );
@@ -1900,7 +1920,7 @@ document
   }
 
   function handleGlobalKeydown(event) {
-    if (event.defaultPrevented || event.isComposing) return;
+    if (event.isComposing) return;
     const key = event.key;
 
     if (key === "Escape") {
@@ -1996,7 +2016,12 @@ document
     }
 
     if (state.mode === "help") return;
-    if (isTextInput(event.target) || state.mode === "insert") return;
+    if (
+      (isTextInput(event.target) || state.mode === "insert") &&
+      !(key.toLowerCase() === "f" && isPrejoinView())
+    ) {
+      return;
+    }
     if (event.metaKey || event.altKey) return;
 
     if (key.toLowerCase() === "f") {

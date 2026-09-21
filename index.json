@@ -12,7 +12,7 @@
     },
     {
       "name": "Teams Vimium navigation",
-      "version": "1.0.2",
+      "version": "1.0.5",
       "description": "Vimium-style keyboard navigation for Teams.",
       "path": "userscripts/teams-vimium.user.js",
       "url": "https://github.com/cfe84/teams-user-scripts/raw/refs/heads/main/userscripts/teams-vimium.user.js",
