@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Teams Vimium navigation
-// @version      1.0.0
+// @version      1.0.2
 // @match        https://teams.microsoft.com/*
 // @match        https://teams.cloud.microsoft/*
 // @match        https://local.teams.office.com/*
@@ -1026,8 +1026,11 @@ document
   }
 
   function hintCodes(targetCount) {
-    const firstKeys = hintFirstKeys();
+    let firstKeys = hintFirstKeys();
     const suffixCapacity = HINT_KEYS.length * HINT_KEYS.length;
+    if (targetCount > firstKeys.length * suffixCapacity) {
+      firstKeys = [...HINT_KEYS];
+    }
     let bestPlan;
 
     for (
@@ -1999,6 +2002,10 @@ document
     if (key.toLowerCase() === "f") {
       state.hintRelayKeysRemaining = 3;
       relayKey(event);
+      prevent(event);
+      enterNormalMode();
+      openHints();
+      return;
     }
 
     if (handleNavigationSequence(key)) {
