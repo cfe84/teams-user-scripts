@@ -26,7 +26,7 @@ Tracks participant time and estimated meeting cost during meetings
 
 ![Meeting meter](img/meeting-meter/meter.png)
 
-Time is calculated in real-time, based on how many participants are in the meeting at any moment. It's using an average $ amount.
+Time is calculated in real-time, based on how many participants are in the meeting at any moment. The meter shows the accumulated meeting cost and the current cost per minute based on the participants currently in the meeting.
 
 When you join later, the meter simply assumes that everyone in the meeting has been there for the full length of the meeting. After that, it tracks attendance second by second to calculate.
 

@@ -2193,6 +2193,7 @@ document
         if (IS_HOSTED_CALENDAR) void openVomnibar();
         return;
       }
+      if (!document.hasFocus() && !IS_HOSTED_CALENDAR) return;
       state.relayedKey = true;
       try {
         handleGlobalKeydown(

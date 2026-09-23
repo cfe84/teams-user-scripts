@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Meeting meter
-// @version      1.1.0
+// @version      1.1.1
 // @match        https://teams.microsoft.com/v2/*
 // @match        https://teams.cloud.microsoft/v2/*
 // @match        https://local.teams.office.com/v2/*
@@ -26,6 +26,7 @@
   let meterRoot;
   let timeDisplay;
   let costDisplay;
+  let costPerMinuteDisplay;
   let observer;
   let timer;
   let modal;
@@ -37,11 +38,11 @@
     return Number.isFinite(value) && value >= 0 ? value : fallback;
   }
 
-  function formatCost(value) {
+  function formatCost(value, fractionDigits = 2) {
     return new Intl.NumberFormat("en-US", {
       currency: "USD",
-      maximumFractionDigits: 2,
-      minimumFractionDigits: 2,
+      maximumFractionDigits: fractionDigits,
+      minimumFractionDigits: fractionDigits,
       style: "currency",
     }).format(value);
   }
@@ -150,7 +151,13 @@
     saveMeetingState();
     if (!meterRoot) return;
     timeDisplay.textContent = formatDuration(totalParticipantSeconds());
-    costDisplay.textContent = formatCost(totalCost());
+    const cost = totalCost();
+    costDisplay.textContent = formatCost(cost);
+    const currentCostPerMinute = currentParticipantCount * employeeCost / 60;
+    costPerMinuteDisplay.textContent = `(${formatCost(
+      currentCostPerMinute,
+      1
+    )}/min)`;
     meterRoot.title = `${currentParticipantCount} participant${
       currentParticipantCount === 1 ? "" : "s"
     } currently counted at ${formatCost(employeeCost)}/hour each`;
@@ -275,12 +282,13 @@
         return;
       }
       employeeCost = nextEmployeeCost;
+      const nextMissedParticipantSeconds = Math.max(
+        0,
+        (Date.now() - nextStart.getTime()) / 1000
+      ) * nextParticipants;
       missedParticipantCount = nextParticipants;
       missedStartTime = nextStart;
-      missedParticipantSeconds = Math.max(
-        0,
-        (Date.now() - missedStartTime.getTime()) / 1000
-      ) * missedParticipantCount;
+      missedParticipantSeconds = nextMissedParticipantSeconds;
       localStorage.setItem(STORAGE_KEY, String(employeeCost));
       saveMeetingState();
       updateMeter();
@@ -350,13 +358,29 @@
     });
     costDisplay.addEventListener("click", openModal);
 
-    meterRoot.append(labelDisplay, timeDisplay, costDisplay);
+    costPerMinuteDisplay = document.createElement("span");
+    costPerMinuteDisplay.setAttribute("aria-label", "Estimated cost per minute");
+    costPerMinuteDisplay.textContent = "($0.0/min)";
+    Object.assign(costPerMinuteDisplay.style, {
+      color: "var(--colorNeutralForeground2, #616161)",
+      font: "inherit",
+      fontVariantNumeric: "tabular-nums",
+      marginInlineStart: "6px",
+      whiteSpace: "nowrap",
+    });
+
+    meterRoot.append(
+      labelDisplay,
+      timeDisplay,
+      costDisplay,
+      costPerMinuteDisplay
+    );
     duration.parentElement.append(meterRoot);
     updateMeter();
   }
 
   installMeter();
-  timer = window.setInterval(updateMeter, 1000);
+  timer = window.setInterval(updateMeter, 100);
   observer = new MutationObserver(installMeter);
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
