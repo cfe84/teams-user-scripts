@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Meeting meter
-// @version      1.1.1
+// @version      1.1.2
 // @match        https://teams.microsoft.com/v2/*
 // @match        https://teams.cloud.microsoft/v2/*
 // @match        https://local.teams.office.com/v2/*
@@ -168,7 +168,7 @@
     modal = undefined;
   }
 
-  function openModal() {
+  function openModal(includeMissedFields = true) {
     if (modal) return;
 
     modal = document.createElement("div");
@@ -198,13 +198,17 @@
 
     const title = document.createElement("h2");
     title.id = "teams-meeting-meter-title";
-    title.textContent = "Meeting cost";
+    title.textContent = includeMissedFields
+      ? "Meeting cost"
+      : "Meeting Meter settings";
     title.style.margin = "0 0 12px";
     title.style.fontSize = "20px";
 
     const explanation = document.createElement("p");
     explanation.textContent =
-      "Cost is estimated from participant-seconds. The missed portion assumes the configured number of participants were present from the selected start time; the live portion counts participants every second after you joined.";
+      includeMissedFields
+        ? "Cost is estimated from participant-seconds. The missed portion assumes the configured number of participants were present from the selected start time; the live portion counts participants every second after you joined."
+        : "Set the average employee cost used to calculate meeting cost and the current cost per minute.";
     Object.assign(explanation.style, {
       fontSize: "14px",
       lineHeight: "1.4",
@@ -214,9 +218,13 @@
     const form = document.createElement("form");
     const fields = [
       ["Average employee cost to company (USD/hour)", "number", employeeCost, "0.01"],
-      ["Missed portion meeting start", "datetime-local", dateTimeInputValue(missedStartTime), undefined],
-      ["Missed portion participants", "number", missedParticipantCount, "1"],
     ];
+    if (includeMissedFields) {
+      fields.push(
+        ["Missed portion meeting start", "datetime-local", dateTimeInputValue(missedStartTime), undefined],
+        ["Missed portion participants", "number", missedParticipantCount, "1"]
+      );
+    }
     const inputs = fields.map(([labelText, type, value, step]) => {
       const label = document.createElement("label");
       label.textContent = labelText;
@@ -270,25 +278,26 @@
     form.addEventListener("submit", event => {
       event.preventDefault();
       const nextEmployeeCost = Number(inputs[0].value);
-      const nextParticipants = Number(inputs[2].value);
-      const nextStart = new Date(inputs[1].value);
-      if (
-        !Number.isFinite(nextEmployeeCost) ||
-        nextEmployeeCost < 0 ||
-        !Number.isFinite(nextParticipants) ||
-        nextParticipants < 0 ||
-        Number.isNaN(nextStart.getTime())
-      ) {
+      if (!Number.isFinite(nextEmployeeCost) || nextEmployeeCost < 0) {
         return;
       }
       employeeCost = nextEmployeeCost;
-      const nextMissedParticipantSeconds = Math.max(
-        0,
-        (Date.now() - nextStart.getTime()) / 1000
-      ) * nextParticipants;
-      missedParticipantCount = nextParticipants;
-      missedStartTime = nextStart;
-      missedParticipantSeconds = nextMissedParticipantSeconds;
+      if (includeMissedFields) {
+        const nextStart = new Date(inputs[1].value);
+        const nextParticipants = Number(inputs[2].value);
+        if (
+          !Number.isFinite(nextParticipants) ||
+          nextParticipants < 0 ||
+          Number.isNaN(nextStart.getTime())
+        ) {
+          return;
+        }
+        missedParticipantCount = nextParticipants;
+        missedStartTime = nextStart;
+        missedParticipantSeconds =
+          Math.max(0, (Date.now() - nextStart.getTime()) / 1000) *
+          nextParticipants;
+      }
       localStorage.setItem(STORAGE_KEY, String(employeeCost));
       saveMeetingState();
       updateMeter();
@@ -384,12 +393,19 @@
   observer = new MutationObserver(installMeter);
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
+  const settings = () => openModal(false);
+  const settingsRegistry = (globalThis.__teamsUserscriptSettings ??= {});
+  settingsRegistry["Meeting meter"] = settings;
+
   globalThis.__teamsMeetingMeter = {
     destroy() {
       observer?.disconnect();
       window.clearInterval(timer);
       closeModal();
       meterRoot?.remove();
+      if (settingsRegistry["Meeting meter"] === settings) {
+        delete settingsRegistry["Meeting meter"];
+      }
       delete globalThis.__teamsMeetingMeter;
     },
   };
